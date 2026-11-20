@@ -1,0 +1,35 @@
+{
+  "name": "giang-ho-ti-thi",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k \"vite --host 0.0.0.0\" \"npm:dev:server\"",
+    "dev:server": "node server/index.js",
+    "build": "vite build",
+    "start": "node server/index.js",
+    "preview": "vite preview --host 0.0.0.0",
+    "check": "node --check server/index.js && node --check server/FightRoom.js && node --check src/game/arena.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@babylonjs/core": "^9.37.1",
+    "@babylonjs/havok": "^1.3.14",
+    "@colyseus/core": "^0.18.28",
+    "@colyseus/schema": "^5.0.50",
+    "@colyseus/sdk": "^0.18.8",
+    "@colyseus/ws-transport": "^0.18.4",
+    "express": "^5.1.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "dotenv": "^16.4.7"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.2.0",
+    "concurrently": "^9.2.1",
+    "vite": "^8.2.0"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}
