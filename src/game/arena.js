@@ -851,8 +851,9 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
   function updateCameraKeys(delta) {
     const turnSpeed = 1.85;
     const lookSpeed = 1.45;
-    if (keys.has('ArrowLeft')) yaw += turnSpeed * delta;
-    if (keys.has('ArrowRight')) yaw -= turnSpeed * delta;
+    // Increasing yaw turns the view towards screen-right in this camera basis.
+    if (keys.has('ArrowLeft')) yaw -= turnSpeed * delta;
+    if (keys.has('ArrowRight')) yaw += turnSpeed * delta;
     if (keys.has('ArrowUp')) pitch = Math.min(0.72, pitch + lookSpeed * delta);
     if (keys.has('ArrowDown')) pitch = Math.max(-0.72, pitch - lookSpeed * delta);
   }

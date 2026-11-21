@@ -8,6 +8,7 @@
 - Khi đã ở trên không, vận tốc ngang bị khoá đến khi chạm đất (kể cả khinh công lần hai). Vận khí chưởng trên không làm nhân vật đứng yên, mất quán tính rồi rơi thẳng xuống.
 - Có thể chạy áp sát rồi nhảy lên bục / đá / tường thấp và di chuyển trên đó; rơi khỏi mép mà chưa nhảy thì chỉ còn một lần khinh công.
 - Có thể ra quyền pháp ngay khi đang chạy (trước đây phải đứng yên mới ra đòn).
+- Đảo chiều hai phím mũi tên trái / phải: mũi tên trái quay camera sang trái, mũi tên phải quay camera sang phải. Điều khiển bằng chuột và mũi tên lên / xuống giữ nguyên.
 
 Chưởng pháp:
 
