@@ -1,3 +1,11 @@
+# Changelog
+
+## v3 – Natural vertical mouse look
+
+- Đảo riêng trục dọc của chuột: di chuyển chuột lên thì camera nhìn lên; di chuyển chuột xuống thì camera nhìn xuống.
+- Áp dụng cho cả Pointer Lock (`movementY`) và kéo chuột thông thường (`clientY`).
+- Giữ nguyên điều khiển góc dọc bằng phím mũi tên và hướng tấn công độc lập với camera.
+
 # Change log
 
 ## Camera / controls / kung-fu FX revision

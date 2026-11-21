@@ -425,7 +425,9 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
 
   function moveLook(dx, dy) {
     yaw += dx * 0.0022;
-    pitch = Math.max(-0.72, Math.min(0.72, pitch + dy * 0.0019));
+    // Natural vertical mouse look: move up to look up, move down to look down.
+    // Keep keyboard ArrowUp / ArrowDown behavior independent and unchanged.
+    pitch = Math.max(-0.72, Math.min(0.72, pitch - dy * 0.0019));
   }
 
   function dashFromKey(code) {

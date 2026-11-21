@@ -41,7 +41,7 @@ npm start       # chạy server; nếu dist/ tồn tại server cũng phục v�
 |---|---|
 | W / A / S / D | Chạy tiến / trái / lùi / phải theo hướng camera |
 | Nhấn nhanh hai lần cùng phím WASD | Bộ pháp lướt nhanh theo hướng đó · hồi chiêu 3 giây |
-| Chuột trái kéo hoặc pointer-lock | Xoay camera (kéo trái nhìn phải, kéo phải nhìn trái) |
+| Chuột trái kéo hoặc pointer-lock | Xoay camera: kéo trái nhìn phải, kéo phải nhìn trái; kéo lên nhìn lên, kéo xuống nhìn xuống |
 | Giữ mũi tên lên / xuống | Nhìn lên / nhìn xuống liên tục, mượt |
 | Giữ mũi tên trái / phải | Xoay camera trái / phải liên tục, mượt |
 | Q (nhấn) | Một chiêu quyền pháp |
