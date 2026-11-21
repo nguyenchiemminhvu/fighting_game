@@ -30,7 +30,7 @@ Các lệnh hữu ích:
 
 ```bash
 npm run check   # kiểm tra cú pháp các module JavaScript phía server/game
-npm test        # kiểm thử cấu hình luật chơi
+npm test        # kiểm thử luật phòng, chiêu thức, đấu trường và auto-aim
 npm run build   # build client vào dist/
 npm start       # chạy server; nếu dist/ tồn tại server cũng phục vụ frontend
 ```
@@ -40,16 +40,16 @@ npm start       # chạy server; nếu dist/ tồn tại server cũng phục v�
 | Phím / thao tác | Chức năng |
 |---|---|
 | W / A / S / D | Chạy tiến / trái / lùi / phải theo hướng camera |
-| Nhấn nhanh hai lần cùng phím WASD | Bộ pháp lướt nhanh theo hướng đó |
-| Chuột trái kéo hoặc pointer-lock | Xoay camera |
-| Mũi tên lên / xuống | Nhìn lên / nhìn xuống |
-| Mũi tên trái / phải | Xoay camera trái / phải |
+| Nhấn nhanh hai lần cùng phím WASD | Bộ pháp lướt nhanh theo hướng đó · hồi chiêu 3 giây |
+| Chuột trái kéo hoặc pointer-lock | Xoay camera (kéo trái nhìn phải, kéo phải nhìn trái) |
+| Giữ mũi tên lên / xuống | Nhìn lên / nhìn xuống liên tục, mượt |
+| Giữ mũi tên trái / phải | Xoay camera trái / phải liên tục, mượt |
 | Q (nhấn) | Một chiêu quyền pháp |
 | Q (giữ) | Chuỗi quyền pháp tối đa ba đòn, đấm / đá xen kẽ |
 | C (giữ) | Vận khí và tự động phát chưởng khi đủ thời gian |
 | Space | Nhảy; nhấn lần hai khi đang trên không để khinh công |
 
-Trong khi ra chiêu, nhân vật bị khóa điều khiển di chuyển; ngoại lệ là lướt bằng bộ pháp. Khi ở trên không, không thể dùng quyền pháp hoặc bộ pháp, nhưng có thể giữ C để vận khí chưởng. Nhân vật được giữ tại độ cao hiện tại trong lúc vận khí trên không, rồi rơi xuống sau khi chưởng được phát.
+Camera ở góc nhìn sau-vai, cao hơn vai một chút; kéo chuột đổi hướng nhìn độc lập với góc nâng/hạ của camera. Di chuyển ngang A/D được quy chiếu theo trục màn hình của camera. Bộ pháp có hồi chiêu 3 giây. Trong khi ra chiêu, nhân vật bị khóa điều khiển di chuyển; ngoại lệ là lướt bằng bộ pháp. Khi ở trên không, không thể dùng quyền pháp hoặc bộ pháp, nhưng có thể giữ C để vận khí chưởng. Nhân vật được giữ tại độ cao hiện tại trong lúc vận khí trên không, rồi rơi xuống sau khi chưởng được phát.
 
 ## 4. Luật và nội dung đã có
 
@@ -60,7 +60,7 @@ Trong khi ra chiêu, nhân vật bị khóa điều khiển di chuyển; ngoại
 - Người còn lại thắng nếu đối thủ rời trận giữa chừng.
 - Kết thúc trận, game tự chuyển về sảnh.
 - Quyền pháp chung có chuỗi tối đa ba hit, xen kẽ hoạt ảnh đấm / đá; mỗi hit có khoảng giãn để đối thủ phục hồi.
-- Chưởng pháp: Nhất Dương Chỉ, Giáng Long Chưởng, Hàn Băng Chưởng, Hoả Diệm Đao, Đại Lực Kim Cang Chưởng và Tiểu Vô Tướng Công.
+- Chưởng pháp: Nhất Dương Chỉ, Giáng Long Chưởng, Hàn Băng Chưởng, Hoả Diệm Đao, Đại Lực Kim Cang Chưởng và Tiểu Vô Tướng Công. Hiệu ứng đạn có tạo hình riêng: tia laser, rồng khí uốn lượn, cụm tinh thể băng, lưỡi hỏa diệm và ấn bàn tay kim cang.
 - Đấu trường có giới hạn di chuyển, trụ, tường, đá và bục; các vật cản đứng yên, có thể nhảy lên bục, đạn chưởng bị triệt tiêu khi va vật cản.
 
 ## 5. Kiến trúc
@@ -102,12 +102,12 @@ git push -u origin main
 1. Tạo project mới trên Railway và chọn **Deploy from GitHub Repo**.
 2. Chọn repository vừa push.
 3. Thiết lập Build Command: `npm install && npm run build`.
-4. Thiết lập Start Command: `npm start`.
-5. Trong Variables, thêm `NODE_ENV=production`. Railway tự cấp biến `PORT`; không cần hard-code port.
-6. Tạo Public Domain cho service.
+4. Trong phần service Settings, đặt Build Command: `npm install && npm run build`; đặt Start Command: `npm start`. Railway cũng có thể tự nhận diện `npm start` từ `package.json`, nhưng nên đặt rõ để tránh nhầm cấu hình.
+5. Trong Variables, thêm `NODE_ENV=production`. Railway tự cấp biến `PORT`; server đã bind `0.0.0.0` và đọc `process.env.PORT`.
+6. Trong Networking, tạo Public Domain cho service.
 7. Kiểm tra `https://<your-domain>/health` trả JSON có `ok: true`, rồi mở domain để chơi.
 
-Client tự dùng cùng origin làm server URL khi deploy chung một service. WebSocket sẽ sử dụng kết nối bảo mật tương ứng với HTTPS.
+Client tự dùng cùng origin làm server URL khi deploy chung một service. WebSocket sẽ sử dụng kết nối bảo mật tương ứng với HTTPS. Khi push commit mới lên branch đã kết nối, Railway sẽ tự build và deploy lại service.
 
 ### Nếu deploy frontend và server ở hai nơi riêng
 
@@ -116,6 +116,8 @@ Client tự dùng cùng origin làm server URL khi deploy chung một service. W
 - Trước khi build frontend, đặt `VITE_SERVER_URL=https://<domain-server>`.
 - Trên server, đặt `ALLOWED_ORIGINS=https://<domain-frontend>`.
 - Cần host server hỗ trợ WebSocket và tiến trình Node chạy liên tục. Không chỉ dùng GitHub Pages cho cả game.
+
+Tài liệu chính thức tham khảo: [GitHub — tạo repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-new-repository), [Railway — Quick Start](https://docs.railway.com/quick-start), [Railway — Services / deploy từ GitHub](https://docs.railway.com/services), [Railway — Build và Start Commands](https://docs.railway.com/builds/build-and-start-commands).
 
 ## 7. Cấu trúc thư mục
 
@@ -132,8 +134,8 @@ server/
 
 ## 8. Giới hạn của bản prototype
 
-- Nhân vật và đấu trường hiện dựng bằng hình học procedural / primitive mesh; chưa có model humanoid rigged, motion capture hoặc bộ animation kung-fu chất lượng sản xuất. Các chuyển động là animation procedural đủ để thử gameplay.
-- Va chạm nhân vật, bục và đòn đánh được mô phỏng bằng logic server gọn nhẹ; Havok đang bật cho vật lý cảnh tĩnh ở client, chưa phải một hệ thống ragdoll / character controller Havok đầy đủ.
+- Nhân vật và đấu trường hiện dựng bằng hình học procedural / primitive mesh; chưa có model humanoid rigged, motion capture hoặc bộ animation kung-fu chất lượng sản xuất. Các chuyển động, vòng vận khí và hiệu ứng chưởng là procedural để prototype gameplay. Giáng Long có pha xoay thân riêng trên model (không xoay camera), sau đó thu khí về tay và phóng rồng khí.
+- Va chạm nhân vật, bục và đòn đánh được mô phỏng bằng logic server gọn nhẹ; Havok đang bật cho vật lý cảnh tĩnh ở client, chưa phải một hệ thống ragdoll / character controller Havok đầy đủ. Bộ pháp có thời gian hồi chiêu 3 giây; chế độ hỗ trợ ngắm mục tiêu 25° là khóa hướng tại thời điểm phóng, không phải đạn tự đuổi theo đối thủ.
 - Sáu phòng hiện là sáu phòng cố định trên một tiến trình Node; chưa có Redis/presence để scale nhiều server.
 - Cần kiểm thử thực tế với hai trình duyệt / độ trễ mạng và cân bằng lại điểm, tầm đánh, knockback trước khi mở public.
 - Hiệu ứng, animation và cân bằng combat là bản nền để tiếp tục thay asset/điều chỉnh, không phải sản phẩm thương mại đã QA.

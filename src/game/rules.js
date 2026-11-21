@@ -81,3 +81,25 @@ export const ARENA_LIMIT = 14.6;
 export function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
+
+// Server-authoritative soft aim: only acquire a target that is already inside
+// the fighter's forward 3D cone. The direction is frozen at launch.
+export function computeAimDirection(source, target, yaw, halfAngleDegrees = 25) {
+  const forwardX = -Math.sin(yaw);
+  const forwardZ = -Math.cos(yaw);
+  const dx = target.x - source.x;
+  const dy = (target.y ?? 0) + 1.0 - ((source.y ?? 0) + 1.25);
+  const dz = target.z - source.z;
+  const length = Math.hypot(dx, dy, dz);
+  const threshold = Math.cos((halfAngleDegrees * Math.PI) / 180);
+
+  if (length > 1e-6) {
+    // A 3D cone also respects height: an airborne opponent well above or below
+    // the fighter is not magically acquired just because the horizontal angle is small.
+    const forwardDot = (dx * forwardX + dz * forwardZ) / length;
+    if (forwardDot >= threshold) {
+      return { x: dx / length, y: dy / length, z: dz / length, locked: true };
+    }
+  }
+  return { x: forwardX, y: 0, z: forwardZ, locked: false };
+}

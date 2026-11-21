@@ -11,7 +11,9 @@ import { PhysicsShapeType } from '@babylonjs/core/Physics/v2/IPhysicsEnginePlugi
 import { ARENA_PROPS, PALMS } from './rules.js';
 
 const FORWARD = (yaw) => ({ x: -Math.sin(yaw), z: -Math.cos(yaw) });
-const RIGHT = (yaw) => ({ x: Math.cos(yaw), z: -Math.sin(yaw) });
+// Babylon's third-person camera uses the opposite horizontal screen-right axis
+// from the old movement basis; this basis keeps A visually left and D right.
+const RIGHT = (yaw) => ({ x: -Math.cos(yaw), z: Math.sin(yaw) });
 
 function makeMat(scene, name, diffuse, options = {}) {
   const mat = new StandardMaterial(name, scene);
@@ -96,6 +98,18 @@ function buildFighter(scene, shadowGenerator, id, name, palette) {
   aura.parent = root; aura.position.y = 0.06; aura.rotation.x = Math.PI / 2;
   aura.material = makeMat(scene, `aura-material-${id}`, '#6ecde8', { emissive: '#2d90af', alpha: 0.5 });
   aura.isVisible = false;
+  const chargeRing = MeshBuilder.CreateTorus(`charge-ring-${id}`, { diameter: 1.48, thickness: 0.035, tessellation: 36 }, scene);
+  chargeRing.parent = root; chargeRing.position.set(0, 1.36, 0); chargeRing.rotation.x = 0.25;
+  chargeRing.material = makeMat(scene, `charge-ring-material-${id}`, '#80dfff', { emissive: '#3aaed1', alpha: 0.62 });
+  chargeRing.isVisible = false;
+  const chargeRing2 = MeshBuilder.CreateTorus(`charge-ring2-${id}`, { diameter: 1.08, thickness: 0.022, tessellation: 32 }, scene);
+  chargeRing2.parent = root; chargeRing2.position.set(0, 1.36, 0); chargeRing2.rotation.z = 0.9;
+  chargeRing2.material = makeMat(scene, `charge-ring2-material-${id}`, '#f3d59b', { emissive: '#bd8b42', alpha: 0.55 });
+  chargeRing2.isVisible = false;
+  const qiOrb = MeshBuilder.CreateSphere(`qi-orb-${id}`, { diameter: 0.42, segments: 16 }, scene);
+  qiOrb.parent = root; qiOrb.position.set(0, 1.43, 0.3);
+  qiOrb.material = makeMat(scene, `qi-orb-material-${id}`, '#b9f4ff', { emissive: '#79e4ff', alpha: 0.86 });
+  qiOrb.isVisible = false;
 
   const parts = [torso, robe, belt, collar, head, hair, topknot, shoulderL, shoulderR,
     armL.bone, armL.joint, armR.bone, armR.joint, sleeveL.bone, sleeveL.joint, sleeveR.bone, sleeveR.joint,
@@ -105,7 +119,7 @@ function buildFighter(scene, shadowGenerator, id, name, palette) {
     shadowGenerator.addShadowCaster(mesh, true);
   }
   return {
-    root, torso, robe, armL, armR, sleeveL, sleeveR, legL, legR, aura,
+    root, torso, robe, armL, armR, sleeveL, sleeveR, legL, legR, aura, chargeRing, chargeRing2, qiOrb,
     parts, target: new Vector3(0, 0, 0), lastAction: 'idle',
   };
 }
@@ -231,7 +245,7 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
   let state = room.state;
   let localId = room.sessionId;
   let yaw = room.state?.players?.get(room.sessionId)?.yaw ?? 0;
-  let pitch = -0.24;
+  let pitch = 0.02;
   let dragging = false;
   let pointerLocked = false;
   let lastMouse = { x: 0, y: 0 };
@@ -249,28 +263,128 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
     return model;
   }
 
+  function addEffectMaterial(materials, name, color, alpha = 1) {
+    const material = makeMat(scene, name, color, { emissive: color, alpha });
+    material.disableLighting = false;
+    materials.push(material);
+    return material;
+  }
+
+  function addEffectMesh(parts, mesh, material, root, position = null, rotation = null) {
+    mesh.parent = root;
+    mesh.material = material;
+    if (position) mesh.position.copyFrom(position);
+    if (rotation) mesh.rotation.copyFrom(rotation);
+    parts.push(mesh);
+    return mesh;
+  }
+
   function spawnProjectile(data) {
     if (fx.has(data.id)) return;
     const palm = PALMS[data.palmId] ?? PALMS.chi;
-    const mat = makeMat(scene, `projectile-mat-${data.id}`, palm.color, { emissive: palm.color });
-    const mesh = data.slash
-      ? MeshBuilder.CreateBox(`projectile-${data.id}`, { width: 2.2, height: 0.11, depth: 0.24 }, scene)
-      : MeshBuilder.CreateSphere(`projectile-${data.id}`, { diameter: Math.max(0.36, data.radius * 1.55), segments: 14 }, scene);
-    mesh.material = mat; mesh.position.set(data.x, data.y, data.z);
-    if (data.slash) mesh.rotation.y = Math.atan2(data.vx, data.vz);
-    else mesh.scaling.z = 1.55;
-    if (palm.id === 'long') {
-      const body = [];
-      for (let i = 0; i < 4; i++) {
-        const segment = MeshBuilder.CreateSphere(`dragon-segment-${data.id}-${i}`, { diameter: 0.36 - i * 0.045, segments: 10 }, scene);
-        segment.material = mat; segment.position.copyFrom(mesh.position); segment.isVisible = false;
+    const root = new TransformNode(`palm-fx-${data.id}`, scene);
+    root.position.set(data.x, data.y, data.z);
+    const velocity = new Vector3(data.vx, data.vy, data.vz);
+    const direction = velocity.lengthSquared() > 1e-6 ? velocity.normalize() : new Vector3(0, 0, 1);
+    root.lookAt(root.position.add(direction));
+
+    const materials = [];
+    const parts = [];
+    const body = [];
+    const main = addEffectMaterial(materials, `palm-fx-main-${data.id}`, palm.color, 0.94);
+    const bright = addEffectMaterial(materials, `palm-fx-bright-${data.id}`, '#f4fbff', 0.98);
+
+    if (palm.id === 'chi') {
+      // A focused, two-layer laser bolt: luminous outer ray and a white-hot core.
+      const halo = MeshBuilder.CreateCylinder(`chi-laser-halo-${data.id}`, { height: 2.3, diameter: 0.19, tessellation: 14 }, scene);
+      halo.rotation.x = Math.PI / 2; halo.position.z = 0.48;
+      addEffectMesh(parts, halo, main, root);
+      const core = MeshBuilder.CreateCylinder(`chi-laser-core-${data.id}`, { height: 2.15, diameter: 0.055, tessellation: 12 }, scene);
+      core.rotation.x = Math.PI / 2; core.position.z = 0.5;
+      addEffectMesh(parts, core, bright, root);
+      const tip = MeshBuilder.CreateSphere(`chi-laser-tip-${data.id}`, { diameter: 0.22, segments: 12 }, scene);
+      tip.position.z = 1.55; addEffectMesh(parts, tip, bright, root);
+      const ring = MeshBuilder.CreateTorus(`chi-laser-ring-${data.id}`, { diameter: 0.25, thickness: 0.035, tessellation: 18 }, scene);
+      ring.position.z = -0.62; addEffectMesh(parts, ring, main, root);
+    } else if (palm.id === 'long') {
+      // Stylized flying dragon: head, eyes, horns, whiskers and a sinuous tapered body.
+      const dragon = addEffectMaterial(materials, `dragon-body-${data.id}`, '#168e91', 1);
+      const belly = addEffectMaterial(materials, `dragon-belly-${data.id}`, '#d7b36f', 1);
+      const eye = addEffectMaterial(materials, `dragon-eye-${data.id}`, '#ffe28a', 1);
+      const head = MeshBuilder.CreateSphere(`dragon-head-${data.id}`, { diameter: 1, segments: 16 }, scene);
+      head.scaling.set(0.37, 0.29, 0.5); head.position.set(0, 0, 0.27);
+      addEffectMesh(parts, head, dragon, root);
+      const muzzle = MeshBuilder.CreateSphere(`dragon-muzzle-${data.id}`, { diameter: 1, segments: 12 }, scene);
+      muzzle.scaling.set(0.22, 0.14, 0.32); muzzle.position.set(0, -0.075, 0.65);
+      addEffectMesh(parts, muzzle, belly, root);
+      const jaw = MeshBuilder.CreateBox(`dragon-jaw-${data.id}`, { width: 0.31, height: 0.07, depth: 0.28 }, scene);
+      jaw.position.set(0, -0.19, 0.61); addEffectMesh(parts, jaw, belly, root);
+      for (const side of [-1, 1]) {
+        const horn = MeshBuilder.CreateCylinder(`dragon-horn-${data.id}-${side}`, { height: 0.42, diameterTop: 0.015, diameterBottom: 0.13, tessellation: 8 }, scene);
+        horn.position.set(side * 0.22, 0.29, 0.1); horn.rotation.z = side * -0.42;
+        addEffectMesh(parts, horn, belly, root);
+        const eyeBall = MeshBuilder.CreateSphere(`dragon-eye-${data.id}-${side}`, { diameter: 0.09, segments: 8 }, scene);
+        eyeBall.position.set(side * 0.255, 0.075, 0.58); addEffectMesh(parts, eyeBall, eye, root);
+        const whisker = MeshBuilder.CreateCylinder(`dragon-whisker-${data.id}-${side}`, { height: 0.66, diameter: 0.025, tessellation: 6 }, scene);
+        whisker.position.set(side * 0.28, -0.02, 0.58); whisker.rotation.x = Math.PI / 2.8; whisker.rotation.z = side * 0.52;
+        addEffectMesh(parts, whisker, belly, root);
+      }
+      for (let i = 0; i < 7; i++) {
+        const segment = MeshBuilder.CreateSphere(`dragon-body-segment-${data.id}-${i}`, { diameter: 1, segments: 12 }, scene);
+        const taper = 0.34 - i * 0.027;
+        segment.scaling.set(taper * 1.08, taper * 0.84, 0.34 - i * 0.022);
+        segment.position.set(0, 0, -0.23 - i * 0.38);
+        addEffectMesh(parts, segment, i % 2 ? belly : dragon, root);
         body.push(segment);
       }
-      mesh.scaling.set(1.4, 0.65, 2.1);
-      fx.set(data.id, { mesh, material: mat, data: { ...data }, life: data.life, body });
+      const tail = MeshBuilder.CreateCylinder(`dragon-tail-${data.id}`, { height: 0.8, diameterTop: 0.015, diameterBottom: 0.22, tessellation: 8 }, scene);
+      tail.rotation.x = Math.PI / 2; tail.position.set(0, 0, -3.0);
+      addEffectMesh(parts, tail, dragon, root);
+      const aura = MeshBuilder.CreateTorus(`dragon-aura-${data.id}`, { diameter: 1.2, thickness: 0.045, tessellation: 24 }, scene);
+      aura.position.z = -0.1; aura.rotation.x = Math.PI / 2; addEffectMesh(parts, aura, bright, root);
+    } else if (palm.id === 'bang') {
+      // Frost shard cluster with a crystalline leading edge.
+      const ice = addEffectMaterial(materials, `ice-crystal-${data.id}`, '#a9efff', 0.9);
+      for (let i = 0; i < 5; i++) {
+        const shard = MeshBuilder.CreatePolyhedron(`ice-shard-${data.id}-${i}`, { type: 1, size: 0.36 + (i % 2) * 0.12 }, scene);
+        shard.position.set(Math.sin(i * 2.4) * 0.23, Math.cos(i * 1.7) * 0.22, 0.18 - i * 0.18);
+        shard.rotation.set(i * 0.7, i * 0.9, i * 0.45);
+        shard.scaling.set(0.55, 1.15, 0.55);
+        addEffectMesh(parts, shard, ice, root);
+      }
+      const frostRing = MeshBuilder.CreateTorus(`ice-ring-${data.id}`, { diameter: 0.95, thickness: 0.035, tessellation: 24 }, scene);
+      frostRing.rotation.x = Math.PI / 2; frostRing.position.z = -0.2; addEffectMesh(parts, frostRing, bright, root);
+    } else if (palm.id === 'hoa') {
+      // Broad horizontal fire blade with a hot core and flame-like ends.
+      const blade = MeshBuilder.CreateBox(`fire-blade-${data.id}`, { width: 2.35, height: 0.2, depth: 0.14 }, scene);
+      blade.position.z = 0.12; blade.rotation.z = -0.09; addEffectMesh(parts, blade, main, root);
+      const core = MeshBuilder.CreateBox(`fire-blade-core-${data.id}`, { width: 1.95, height: 0.065, depth: 0.17 }, scene);
+      core.position.z = 0.18; addEffectMesh(parts, core, bright, root);
+      for (const side of [-1, 1]) {
+        const flame = MeshBuilder.CreateSphere(`fire-flame-${data.id}-${side}`, { diameter: 0.42, segments: 10 }, scene);
+        flame.scaling.set(0.75, 0.48, 1.5); flame.position.set(side * 1.12, side * 0.12, 0.16);
+        addEffectMesh(parts, flame, main, root);
+      }
+    } else if (palm.id === 'kim') {
+      // Large palm-shaped qi seal: palm pad, four fingers and an opposing thumb.
+      const gold = addEffectMaterial(materials, `kim-gold-${data.id}`, '#f5d78c', 0.96);
+      const palmPad = MeshBuilder.CreateSphere(`kim-palm-${data.id}`, { diameter: 1, segments: 14 }, scene);
+      palmPad.scaling.set(0.48, 0.38, 0.12); addEffectMesh(parts, palmPad, gold, root);
+      for (let i = 0; i < 4; i++) {
+        const finger = MeshBuilder.CreateCapsule(`kim-finger-${data.id}-${i}`, { height: 0.56 - i * 0.035, radius: 0.075, tessellation: 8 }, scene);
+        finger.position.set(-0.31 + i * 0.205, 0.37 + Math.sin(i / 3 * Math.PI) * 0.04, 0.015);
+        addEffectMesh(parts, finger, bright, root);
+      }
+      const thumb = MeshBuilder.CreateCapsule(`kim-thumb-${data.id}`, { height: 0.48, radius: 0.085, tessellation: 8 }, scene);
+      thumb.position.set(-0.51, -0.02, 0); thumb.rotation.z = -0.78; addEffectMesh(parts, thumb, gold, root);
+      const palmAura = MeshBuilder.CreateTorus(`kim-aura-${data.id}`, { diameter: 1.45, thickness: 0.055, tessellation: 24 }, scene);
+      palmAura.rotation.x = Math.PI / 2; palmAura.position.z = -0.12; addEffectMesh(parts, palmAura, gold, root);
     } else {
-      fx.set(data.id, { mesh, material: mat, data: { ...data }, life: data.life, body: [] });
+      const orb = MeshBuilder.CreateSphere(`palm-orb-${data.id}`, { diameter: Math.max(0.36, data.radius * 1.55), segments: 14 }, scene);
+      addEffectMesh(parts, orb, main, root);
     }
+
+    fx.set(data.id, { root, materials, parts, body, data: { ...data }, life: data.life, age: 0 });
   }
 
   function burst(x, y, z, color = '#e8d4a9') {
@@ -285,7 +399,9 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
     const effect = fx.get(data.id);
     if (effect) {
       if (data.hit) burst(data.x, data.y, data.z, effect.data.color);
-      effect.mesh.dispose(); effect.body.forEach((m) => m.dispose()); effect.material.dispose(); fx.delete(data.id);
+      effect.root.dispose(false, false);
+      effect.materials.forEach((material) => material.dispose());
+      fx.delete(data.id);
     }
   });
   room.onMessage('impact', (data) => burst(data.x, data.y, data.z, data.palm === 'hoa' ? '#ff7a35' : data.palm === 'bang' ? '#8be8ff' : '#e8d4a9'));
@@ -304,12 +420,12 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
     if (keys.has('KeyA')) right -= 1;
     const mag = Math.hypot(forward, right);
     if (mag > 1) { forward /= mag; right /= mag; }
-    room.send('input', { forward, right, yaw, pitch });
+    room.send('input', { forward, right, yaw, pitch: 0 });
   }
 
   function moveLook(dx, dy) {
-    yaw -= dx * 0.0022;
-    pitch = Math.max(-0.62, Math.min(0.72, pitch - dy * 0.0019));
+    yaw += dx * 0.0022;
+    pitch = Math.max(-0.72, Math.min(0.72, pitch + dy * 0.0019));
   }
 
   function dashFromKey(code) {
@@ -325,11 +441,12 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
 
   function onKeyDown(event) {
     if (disposed) return;
-    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) event.preventDefault();
-    if (event.code === 'ArrowUp') { pitch = Math.min(0.72, pitch + 0.055); return; }
-    if (event.code === 'ArrowDown') { pitch = Math.max(-0.62, pitch - 0.055); return; }
-    if (event.code === 'ArrowLeft') { yaw += 0.06; return; }
-    if (event.code === 'ArrowRight') { yaw -= 0.06; return; }
+    const cameraKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
+    if (event.code === 'Space' || cameraKeys.includes(event.code)) event.preventDefault();
+    if (cameraKeys.includes(event.code)) {
+      keys.add(event.code);
+      return;
+    }
     if (event.repeat) return;
     if (event.code.startsWith('Key') && !['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyC'].includes(event.code)) return;
     keys.add(event.code);
@@ -398,11 +515,20 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
     const local = model.root.metadata?.local;
     const smoothing = local ? 0.48 : 0.24;
     model.root.position = Vector3.Lerp(model.root.position, target, smoothing);
-    model.root.rotation.y = lerpAngle(model.root.rotation.y, player.yaw, 0.32);
+    const baseBodyYaw = player.yaw + Math.PI; // rig's local forward axis is +Z.
+    // Reconstruct action time locally from the last authoritative state change.
+    // This gives the long palm's 360-degree sweep fluid 60-fps motion between
+    // Colyseus snapshots instead of stepping at the network patch rate.
+    if (model.lastAction !== player.action) {
+      model.lastAction = player.action;
+      model.actionStartedAt = now - (Number(player.actionT) || 0) * 1000;
+    }
+    const visualActionT = Math.max(0, (now - (model.actionStartedAt || now)) / 1000);
     const runPhase = now * 0.012;
     const running = player.action === 'run';
     const jumping = player.action === 'jump' || player.y > 0.06;
     const charging = player.action === 'charge';
+    const activePalm = player.activePalm || player.palm;
     const combo = player.action === 'combo';
     const dash = player.action === 'dash';
     const hit = player.action === 'stun';
@@ -417,25 +543,87 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
     model.torso.rotation.z = dash ? -0.22 : jumping ? 0.05 : hit ? Math.sin(now * 0.06) * 0.08 : 0;
     model.torso.rotation.y = 0;
     if (combo) {
-      const punch = Math.max(0, Math.sin((player.actionT * 7.5) % Math.PI));
-      if (step % 2 === 1) model.armR.pivot.rotation.x = -1.9 * punch - 0.65;
-      else model.legR.pivot.rotation.x = -1.5 * punch;
-      model.armL.pivot.rotation.x = step % 2 === 0 ? -1.7 * punch : -0.25;
+      const punch = Math.max(0, Math.sin((visualActionT * 7.5) % Math.PI));
+      if (step % 2 === 1) {
+        model.armR.pivot.rotation.x = -1.95 * punch - 0.62;
+        model.torso.rotation.x = -0.1 * punch;
+      } else {
+        model.legR.pivot.rotation.x = -1.55 * punch;
+        model.armL.pivot.rotation.x = -1.7 * punch;
+      }
     }
     if (charging) {
-      model.armL.pivot.rotation.x = -1.35;
-      model.armR.pivot.rotation.x = -1.35;
-      model.armL.pivot.rotation.z = -0.35;
-      model.armR.pivot.rotation.z = 0.35;
+      const chargeT = visualActionT;
+      const isDragon = activePalm === 'long';
       model.aura.isVisible = true;
+      model.chargeRing.isVisible = true;
+      model.chargeRing2.isVisible = true;
+      model.qiOrb.isVisible = true;
       model.aura.scaling.setAll(1 + Math.sin(now * 0.012) * 0.12);
-      model.torso.rotation.y = player.palm === 'long' ? Math.sin(player.actionT * 5.4) * 0.95 : 0;
+      model.chargeRing.rotation.y += 0.035;
+      model.chargeRing2.rotation.x += 0.027;
+      model.chargeRing.scaling.setAll(0.9 + Math.sin(now * 0.009) * 0.08);
+      if (isDragon) {
+        // First 0.42 s: sweep the arms and turn the body a full 360 degrees.
+        // Then pull the released ambient qi back into the palms for the thrust.
+        const sweep = Math.min(1, chargeT / 0.42);
+        const gather = Math.max(0, Math.min(1, (chargeT - 0.42) / 0.78));
+        model.root.rotation.y = baseBodyYaw + sweep * Math.PI * 2;
+        if (chargeT < 0.42) {
+          model.armL.pivot.rotation.x = -0.18;
+          model.armR.pivot.rotation.x = -0.18;
+          model.armL.pivot.rotation.z = -0.82;
+          model.armR.pivot.rotation.z = 0.82;
+          model.torso.rotation.x = -0.04;
+        } else {
+          model.armL.pivot.rotation.x = -1.05 - gather * 0.22;
+          model.armR.pivot.rotation.x = -1.05 - gather * 0.22;
+          model.armL.pivot.rotation.z = -0.5 * (1 - gather);
+          model.armR.pivot.rotation.z = 0.5 * (1 - gather);
+          model.torso.rotation.x = -0.08 * gather;
+        }
+        model.qiOrb.position.set(0, 1.45, 0.22 + gather * 0.48);
+        model.qiOrb.scaling.setAll(0.18 + gather * 1.08 + Math.sin(now * 0.025) * 0.05);
+        model.chargeRing.material.alpha = 0.28 + gather * 0.42;
+      } else {
+        model.root.rotation.y = lerpAngle(model.root.rotation.y, baseBodyYaw, 0.32);
+        model.armL.pivot.rotation.x = -1.18;
+        model.armR.pivot.rotation.x = -1.18;
+        model.armL.pivot.rotation.z = -0.3;
+        model.armR.pivot.rotation.z = 0.3;
+        model.qiOrb.position.set(0.12, 1.42, 0.36);
+        model.qiOrb.scaling.setAll(0.45 + Math.sin(now * 0.018) * 0.13);
+      }
     } else {
+      model.root.rotation.y = lerpAngle(model.root.rotation.y, baseBodyYaw, 0.32);
       model.aura.isVisible = false;
+      model.chargeRing.isVisible = false;
+      model.chargeRing2.isVisible = false;
+      model.qiOrb.isVisible = false;
+      model.torso.rotation.x = jumping ? -0.02 : 0;
     }
     if (player.action === 'cast') {
-      model.armR.pivot.rotation.x = -2.25;
-      model.armL.pivot.rotation.x = -0.38;
+      const palm = activePalm;
+      if (palm === 'long') {
+        model.armR.pivot.rotation.x = -2.42;
+        model.armL.pivot.rotation.x = -2.12;
+        model.torso.rotation.x = -0.18;
+      } else if (palm === 'chi') {
+        model.armR.pivot.rotation.x = -2.5;
+        model.armR.pivot.rotation.z = -0.05;
+        model.armL.pivot.rotation.x = -0.55;
+      } else if (palm === 'hoa') {
+        model.armR.pivot.rotation.x = -1.95;
+        model.armR.pivot.rotation.z = -0.72;
+        model.armL.pivot.rotation.x = -0.35;
+      } else if (palm === 'kim') {
+        model.armR.pivot.rotation.x = -2.15;
+        model.armL.pivot.rotation.x = -2.15;
+        model.torso.rotation.x = -0.12;
+      } else {
+        model.armR.pivot.rotation.x = -2.15;
+        model.armL.pivot.rotation.x = -0.6;
+      }
     }
     if (player.action === 'jump') {
       model.armL.pivot.rotation.x = -0.95; model.armR.pivot.rotation.x = -0.95;
@@ -443,10 +631,20 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
     model.robe.rotation.y = Math.sin(now * 0.002 + (player.x || 0)) * 0.025;
   }
 
+  function updateCameraKeys(delta) {
+    const turnSpeed = 1.85;
+    const lookSpeed = 1.45;
+    if (keys.has('ArrowLeft')) yaw += turnSpeed * delta;
+    if (keys.has('ArrowRight')) yaw -= turnSpeed * delta;
+    if (keys.has('ArrowUp')) pitch = Math.min(0.72, pitch + lookSpeed * delta);
+    if (keys.has('ArrowDown')) pitch = Math.max(-0.72, pitch - lookSpeed * delta);
+  }
+
   function render() {
     if (disposed) return;
     const now = performance.now();
     const delta = Math.min(0.05, engine.getDeltaTime() / 1000 || 0.016);
+    updateCameraKeys(delta);
     sendInput(now);
     const players = state?.players;
     const localPlayer = localId && players?.get(localId);
@@ -467,14 +665,21 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
       }
       if (localPlayer) {
         const fwd = FORWARD(yaw);
-        const distance = 6.8;
-        const target = new Vector3(localPlayer.x, localPlayer.y + 1.35, localPlayer.z);
+        const shoulderRight = { x: Math.cos(yaw), z: -Math.sin(yaw) };
+        const cameraAnchor = new Vector3(localPlayer.x, localPlayer.y, localPlayer.z);
         camera.position.set(
-          target.x - fwd.x * Math.cos(pitch) * distance,
-          target.y - Math.sin(pitch) * distance + 0.25,
-          target.z - fwd.z * Math.cos(pitch) * distance,
+          cameraAnchor.x - fwd.x * 4.7 + shoulderRight.x * 0.62,
+          cameraAnchor.y + 2.2,
+          cameraAnchor.z - fwd.z * 4.7 + shoulderRight.z * 0.62,
         );
-        camera.setTarget(target);
+        // Aim the camera over the near shoulder, not down the spell's barrel.
+        // Pitch affects only this view point; the server keeps combat aim separate.
+        const lookTarget = new Vector3(
+          cameraAnchor.x + fwd.x * 5.4,
+          cameraAnchor.y + 1.55 + Math.tan(pitch) * 5.4,
+          cameraAnchor.z + fwd.z * 5.4,
+        );
+        camera.setTarget(lookTarget);
       }
       if (callbacks.onState && now - lastHudSend > 100) {
         lastHudSend = now;
@@ -496,14 +701,24 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
 
     for (const [id, effect] of fx.entries()) {
       const d = effect.data;
-      effect.mesh.position.addInPlace(new Vector3(d.vx, d.vy, d.vz).scale(delta));
+      effect.root.position.addInPlace(new Vector3(d.vx, d.vy, d.vz).scale(delta));
       effect.life -= delta;
+      effect.age += delta;
       if (effect.body.length) {
-        const velocity = new Vector3(d.vx, d.vy, d.vz).normalize();
         effect.body.forEach((segment, i) => {
-          segment.isVisible = true;
-          segment.position.copyFrom(effect.mesh.position.subtract(velocity.scale((i + 1) * 0.42)));
+          const phase = effect.age * 8.2 - i * 0.78;
+          segment.position.x = Math.sin(phase) * (0.08 + i * 0.012);
+          segment.position.y = Math.cos(phase * 0.84) * 0.105;
+          segment.position.z = -0.23 - i * 0.38;
+          segment.rotation.z = Math.sin(phase) * 0.22;
         });
+        const head = effect.parts[0];
+        if (head) head.position.y = Math.sin(effect.age * 9.5) * 0.055;
+      }
+      if (d.palmId === 'bang') effect.root.rotation.z += delta * 2.2;
+      if (d.palmId === 'hoa') {
+        const pulse = 0.92 + Math.sin(effect.age * 28) * 0.08;
+        effect.root.scaling.set(pulse, pulse, 1);
       }
     }
     for (let i = rings.length - 1; i >= 0; i--) {
@@ -540,7 +755,7 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
       canvas.removeEventListener('pointerdown', onPointerDown);
       canvas.removeEventListener('contextmenu', onContextMenu);
       if (document.pointerLockElement === canvas) document.exitPointerLock?.();
-      for (const effect of fx.values()) { effect.mesh.dispose(); effect.body.forEach((m) => m.dispose()); effect.material.dispose(); }
+      for (const effect of fx.values()) { effect.root.dispose(false, false); effect.materials.forEach((material) => material.dispose()); }
       for (const ring of rings) { ring.mesh.dispose(); ring.material.dispose(); }
       engine.stopRenderLoop(render);
       scene.dispose(); engine.dispose();

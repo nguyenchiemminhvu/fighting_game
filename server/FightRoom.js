@@ -7,6 +7,7 @@ import {
   PALMS,
   PREP_SECONDS,
   clamp,
+  computeAimDirection,
 } from '../src/game/rules.js';
 
 class PlayerState extends Schema {
@@ -121,7 +122,7 @@ export class FightRoom extends Room {
       qHeld: false, comboElapsed: 0, comboHits: 1, comboIndex: 0,
       chargeElapsed: 0, chargeLockedY: 0,
       actionElapsed: 0, actionLock: 0,
-      dashElapsed: 0, dashX: 0, dashZ: 0,
+      dashElapsed: 0, dashX: 0, dashZ: 0, dashCooldownUntil: 0,
       slowUntil: 0, burnUntil: 0, burnNextAt: 0,
       stunUntil: 0,
       cooldownUntil: 0,
@@ -200,7 +201,9 @@ export class FightRoom extends Room {
     const rt = this.runtime.get(client.sessionId);
     if (!p || !rt || this.state.phase !== 'fight') return;
     p.yaw = Number.isFinite(payload?.yaw) ? payload.yaw : p.yaw;
-    p.pitch = clamp(Number.isFinite(payload?.pitch) ? payload.pitch : p.pitch, -0.42, 0.82);
+    // Camera pitch is local presentation only; combat attacks are aimed from
+    // the fighter heading and optional 25-degree soft target acquisition.
+    p.pitch = 0;
     rt.forward = clamp(Number(payload?.forward) || 0, -1, 1);
     rt.right = clamp(Number(payload?.right) || 0, -1, 1);
   }
@@ -269,7 +272,8 @@ export class FightRoom extends Room {
     const p = this.state.players.get(client.sessionId);
     const rt = this.runtime.get(client.sessionId);
     if (!p || !rt || this.state.phase !== 'fight' || p.y > 0.08 || p.action !== 'idle' && p.action !== 'run') return;
-    if (rt.slowUntil > Date.now() || rt.dashElapsed > 0) return;
+    const now = Date.now();
+    if (rt.slowUntil > now || rt.dashElapsed > 0 || rt.dashCooldownUntil > now) return;
     const x = clamp(Number(payload?.x) || 0, -1, 1);
     const z = clamp(Number(payload?.z) || 0, -1, 1);
     const length = Math.hypot(x, z);
@@ -277,6 +281,7 @@ export class FightRoom extends Room {
     rt.dashX = x / length;
     rt.dashZ = z / length;
     rt.dashElapsed = 0.17;
+    rt.dashCooldownUntil = now + 3000;
     p.action = 'dash';
     p.actionT = 0;
     rt.forward = 0; rt.right = 0;
@@ -390,7 +395,7 @@ export class FightRoom extends Room {
         const nf = f / Math.max(1, mag);
         const nr = r / Math.max(1, mag);
         const forward = forwardVector(p.yaw, 0);
-        const right = { x: Math.cos(p.yaw), z: -Math.sin(p.yaw) };
+        const right = { x: -Math.cos(p.yaw), z: Math.sin(p.yaw) };
         const dx = (forward.x * nf + right.x * nr) * speed * dt;
         const dz = (forward.z * nf + right.z * nr) * speed * dt;
         this.moveWithCollisions(p, dx, dz);
@@ -470,8 +475,20 @@ export class FightRoom extends Room {
   }
 
   launchPalm(id, p, rt, palm) {
-    const dir = forwardVector(p.yaw, p.pitch);
-    const origin = { x: p.x + dir.x * 0.72, y: p.y + 1.25 + dir.y * 0.4, z: p.z + dir.z * 0.72 };
+    const targetEntry = [...this.state.players.entries()].find(([otherId]) => otherId !== id);
+    const target = targetEntry?.[1];
+    // Target acquisition is computed on the authoritative server. Camera pitch
+    // never steers attacks; targets outside +/-25 degrees receive a straight shot.
+    let dir = target
+      ? computeAimDirection(p, target, p.yaw, 25)
+      : { ...forwardVector(p.yaw, 0), locked: false };
+    // Hỏa Diệm Đao is deliberately a level horizontal blade: its height is
+    // fixed so opponents can evade it by jumping or dropping, not strafing.
+    if (palm.slash) {
+      const horizontalLength = Math.hypot(dir.x, dir.z) || 1;
+      dir = { x: dir.x / horizontalLength, y: 0, z: dir.z / horizontalLength, locked: Boolean(dir.locked) };
+    }
+    const origin = { x: p.x + dir.x * 0.72, y: p.y + 1.25, z: p.z + dir.z * 0.72 };
     const projectile = {
       id: `${this.roomId}-${this.projectileSeq++}`,
       ownerId: id,
@@ -488,6 +505,7 @@ export class FightRoom extends Room {
       burnSeconds: palm.burnSeconds ?? 0,
       slash: Boolean(palm.slash),
       color: palm.color,
+      aimLocked: Boolean(dir.locked),
       life: palm.range / palm.speed + 0.5,
     };
     this.projectiles.push(projectile);

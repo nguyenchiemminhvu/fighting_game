@@ -32,3 +32,43 @@ test('arena is bounded and contains fixed collision props', () => {
     assert.ok(prop.w > 0 && prop.d > 0 && prop.h > 0);
   }
 });
+
+test('soft aim locks only targets inside the 25-degree forward cone', async () => {
+  const { computeAimDirection } = await import('../src/game/rules.js');
+  const source = { x: 0, y: 0, z: 0 };
+  const inCone = { x: 2, y: 0, z: -8 };
+  const outOfCone = { x: 5, y: 0, z: -8 };
+  const locked = computeAimDirection(source, inCone, 0, 25);
+  const straight = computeAimDirection(source, outOfCone, 0, 25);
+  assert.equal(locked.locked, true);
+  assert.ok(locked.x > 0);
+  assert.equal(straight.locked, false);
+  assert.ok(Math.abs(straight.x) < 1e-9);
+  assert.equal(straight.z, -1);
+});
+
+test('soft aim includes target elevation when an enemy is inside the forward cone', async () => {
+  const { computeAimDirection } = await import('../src/game/rules.js');
+  const direction = computeAimDirection(
+    { x: 0, y: 0, z: 0 },
+    { x: 0, y: 2, z: -6 },
+    0,
+    25,
+  );
+  assert.equal(direction.locked, true);
+  assert.ok(direction.y > 0);
+  assert.ok(Math.abs(Math.hypot(direction.x, direction.y, direction.z) - 1) < 1e-9);
+});
+
+test('soft aim cone includes vertical separation in its 3D angle', async () => {
+  const { computeAimDirection } = await import('../src/game/rules.js');
+  const tooHigh = computeAimDirection(
+    { x: 0, y: 0, z: 0 },
+    { x: 0, y: 5, z: -4 },
+    0,
+    25,
+  );
+  assert.equal(tooHigh.locked, false);
+  assert.equal(tooHigh.y, 0);
+  assert.equal(tooHigh.z, -1);
+});
