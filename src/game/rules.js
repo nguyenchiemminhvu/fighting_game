@@ -13,38 +13,41 @@ export const ROOMS = [
 export const PALMS = {
   chi: {
     id: 'chi', name: 'Nhất Dương Chỉ', short: 'Nhất Dương', icon: '☯',
-    charge: 0.3, cooldown: 2, range: 24, speed: 34, score: 8, knockback: 1.5,
+    charge: 0.2, cooldown: 1.33, range: 24, speed: 34, score: 8, knockback: 1.5,
     radius: 0.22, color: '#d9ecff', effect: 'interrupt',
     description: 'Chỉ lực cực nhanh, tầm xa. Sát thương thấp, hủy vận khí của đối thủ.',
-    detail: 'Vận khí 0,3s · Hồi 2s · Tầm xa',
+    detail: 'Vận khí 0,2s · Hồi 1,3s · Tầm xa',
   },
   long: {
     id: 'long', name: 'Giáng Long Chưởng', short: 'Giáng Long', icon: '🐉',
-    charge: 1.5, cooldown: 5, range: 23, speed: 23, score: 23, knockback: 5.2,
+    charge: 1.0, cooldown: 3.33, range: 23, speed: 23, score: 23, knockback: 5.2,
     radius: 0.72, color: '#8fd2df', effect: 'interrupt', spin: true,
     description: 'Xoay người tụ lực rồi phóng long khí. Sát thương và lực đẩy rất lớn.',
-    detail: 'Vận khí 1,5s · Hồi 5s · Tầm xa',
+    detail: 'Vận khí 1s · Hồi 3,3s · Tầm xa',
   },
   bang: {
     id: 'bang', name: 'Hàn Băng Chưởng', short: 'Hàn Băng', icon: '❄',
-    charge: 0.8, cooldown: 4, range: 16, speed: 23, score: 14, knockback: 1.8,
+    charge: 0.53, cooldown: 2.67, range: 16, speed: 23, score: 14, knockback: 1.8,
     radius: 0.52, color: '#9ee9ff', effect: 'slow', slowSeconds: 5,
     description: 'Hàn khí làm chậm 5 giây và khóa bộ pháp của đối thủ.',
-    detail: 'Vận khí 0,8s · Hồi 4s · Tầm trung',
+    detail: 'Vận khí 0,5s · Hồi 2,7s · Tầm trung',
   },
   hoa: {
     id: 'hoa', name: 'Hoả Diệm Đao', short: 'Hoả Diệm', icon: '🔥',
-    charge: 0.6, cooldown: 3, range: 16, speed: 23, score: 13, knockback: 1.7,
+    charge: 0.4, cooldown: 2, range: 16, speed: 23, score: 13, knockback: 1.7,
     radius: 0.52, color: '#ff873f', effect: 'burn', burnSeconds: 3, slash: true,
     description: 'Hỏa nhận chém ngang, khó né trái phải; có thể né bằng cách đổi độ cao.',
-    detail: 'Vận khí 0,6s · Hồi 3s · Tầm trung',
+    detail: 'Vận khí 0,4s · Hồi 2s · Tầm trung',
   },
   kim: {
     id: 'kim', name: 'Đại Lực Kim Cang Chưởng', short: 'Kim Cang', icon: '✋',
-    charge: 0.8, cooldown: 4, range: 8, speed: 25, score: 22, knockback: 5.0,
-    radius: 1.2, color: '#f3dfb0', effect: 'interrupt',
-    description: 'Chưởng lực diện rộng, tầm gần nhưng uy lực và lực đẩy rất mạnh.',
-    detail: 'Vận khí 0,8s · Hồi 4s · Tầm gần, vùng rộng',
+    charge: 0.53, cooldown: 2.67, range: 8, speed: 25, score: 22, knockback: 5.0,
+    // A giant palm front: `radius` spans across the flight path, `depth` along
+    // it, and only the small `terrainRadius` core is stopped by terrain.
+    radius: 3.6, depth: 1.2, terrainRadius: 0.5, visualScale: 3,
+    color: '#f3dfb0', effect: 'interrupt',
+    description: 'Bàn tay khổng lồ tầm gần, không thể né ngang hay nhảy qua — chỉ có thể lùi ra xa.',
+    detail: 'Vận khí 0,5s · Hồi 2,7s · Tầm gần, vùng rất rộng',
   },
   xiao: {
     id: 'xiao', name: 'Tiểu Vô Tướng Công', short: 'Vô Tướng', icon: '☯',

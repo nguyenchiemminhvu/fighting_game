@@ -9,6 +9,33 @@ import {
   clamp,
   computeAimDirection,
 } from '../src/game/rules.js';
+import {
+  NEUTRAL_CMD,
+  TICK_DT,
+  chargeProgress,
+  createFighter,
+  decodeCmd,
+  displaceFighter,
+  packFighter,
+  stepFighter,
+  stunFighter,
+} from '../src/game/fighter.js';
+
+const PATCH_RATE_MS = 1000 / 30;
+// Authoritative snapshots for client reconciliation go out every other tick.
+const ACK_EVERY_TICKS = 2;
+// One command is consumed per tick; extra ones only when more than this many
+// are waiting, which absorbs network jitter without adding lasting latency.
+const CMD_BUFFER_TARGET = 2;
+// Commands are paid for with real time, so a client cannot simulate faster
+// than the clock beyond a small catch-up allowance and a bounded burst.
+const CMD_BUDGET_PER_TICK = 1.05;
+const CMD_BUDGET_MAX = 15;
+const CMD_QUEUE_MAX = 30;
+const CMD_BATCH_MAX = 32;
+// A client that stops sending is simulated with neutral input after this long.
+const CMD_SILENCE_MS = 250;
+const MAX_CATCH_UP_SECONDS = 0.1;
 
 class PlayerState extends Schema {
   constructor() {
@@ -48,11 +75,14 @@ class FightState extends Schema {
     this.winnerSessionId = '';
     this.resultReason = '';
     this.roundNo = 0;
+    // Simulation time in seconds; clients interpolate remote fighters against it.
+    this.clock = 0;
   }
 }
 defineTypes(FightState, {
   roomKey: 'string', phase: 'string', prepLeft: 'number', timeLeft: 'number',
   players: { map: PlayerState }, winnerSessionId: 'string', resultReason: 'string', roundNo: 'number',
+  clock: 'number',
 });
 
 function safeName(value) {
@@ -65,16 +95,6 @@ function forwardVector(yaw, pitch = 0) {
   return { x: -Math.sin(yaw) * cp, y: Math.sin(pitch), z: -Math.cos(yaw) * cp };
 }
 
-function distance3(a, b) {
-  return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
-}
-
-function overlapsProp(x, z, radius, prop) {
-  const cx = clamp(x, prop.x - prop.w / 2, prop.x + prop.w / 2);
-  const cz = clamp(z, prop.z - prop.d / 2, prop.z + prop.d / 2);
-  return (x - cx) ** 2 + (z - cz) ** 2 < radius ** 2;
-}
-
 export class FightRoom extends Room {
   static registry = new Map();
 
@@ -83,23 +103,21 @@ export class FightRoom extends Room {
     this.roomLabel = options.label;
     this.maxClients = 2;
     this.autoDispose = false;
+    this.patchRate = PATCH_RATE_MS;
     this.setState(new FightState(this.roomKey));
     this.runtime = new Map();
     this.projectiles = [];
     this.projectileSeq = 1;
     this.ending = false;
     this._endTimer = null;
-    this._burnPulse = 0;
+    this.tickDebt = 0;
+    this.tickCount = 0;
+    this.events = [];
     FightRoom.registry.set(this.roomKey, this);
 
     this.onMessage('select-palm', (client, payload) => this.selectPalm(client, payload));
-    this.onMessage('input', (client, payload) => this.setInput(client, payload));
-    this.onMessage('q-held', (client, payload) => this.setQHeld(client, payload));
-    this.onMessage('charge-start', (client) => this.startCharge(client));
-    this.onMessage('charge-cancel', (client) => this.cancelCharge(client));
-    this.onMessage('jump', (client) => this.jump(client));
-    this.onMessage('dash', (client, payload) => this.dash(client, payload));
-    this.setSimulationInterval((deltaMs) => this.tick(Math.min(0.06, deltaMs / 1000)));
+    this.onMessage('cmds', (client, payload) => this.queueCmds(client, payload));
+    this.setSimulationInterval((deltaMs) => this.update(deltaMs));
   }
 
   onJoin(client, options) {
@@ -117,15 +135,9 @@ export class FightRoom extends Room {
     player.activePalm = 'chi';
     this.state.players.set(client.sessionId, player);
     this.runtime.set(client.sessionId, {
-      forward: 0, right: 0,
-      vy: 0, jumps: 0, grounded: true,
-      qHeld: false, comboElapsed: 0, comboHits: 1, comboIndex: 0,
-      chargeElapsed: 0, chargeLockedY: 0,
-      actionElapsed: 0, actionLock: 0,
-      dashElapsed: 0, dashX: 0, dashZ: 0, dashCooldownUntil: 0,
-      slowUntil: 0, burnUntil: 0, burnNextAt: 0,
-      stunUntil: 0,
-      cooldownUntil: 0,
+      fighter: createFighter(player.x, player.z, player.yaw),
+      queue: [], queuedSeq: 0, lastSeq: 0, lastCmdAt: 0, budget: 0,
+      burnUntil: 0, burnNextAt: 0,
     });
     if (this.state.players.size === 2) {
       this.state.phase = 'select';
@@ -144,7 +156,12 @@ export class FightRoom extends Room {
         p.action = 'idle';
         p.actionT = 0;
         const rt = this.runtime.get(id);
-        if (rt) Object.assign(rt, { vy: 0, jumps: 0, grounded: true, forward: 0, right: 0 });
+        if (rt) {
+          rt.fighter = createFighter(p.x, p.z, p.yaw);
+          rt.queue.length = 0;
+          rt.burnUntil = 0;
+          this.syncPlayer(p, rt.fighter);
+        }
       }
       this.broadcast('match-starting', { prepSeconds: PREP_SECONDS });
     }
@@ -196,135 +213,81 @@ export class FightRoom extends Room {
     p.ready = true;
   }
 
-  setInput(client, payload) {
-    const p = this.state.players.get(client.sessionId);
+  queueCmds(client, payload) {
     const rt = this.runtime.get(client.sessionId);
-    if (!p || !rt || this.state.phase !== 'fight') return;
-    p.yaw = Number.isFinite(payload?.yaw) ? payload.yaw : p.yaw;
-    // Camera pitch is local presentation only; combat attacks are aimed from
-    // the fighter heading and optional 25-degree soft target acquisition.
-    p.pitch = 0;
-    rt.forward = clamp(Number(payload?.forward) || 0, -1, 1);
-    rt.right = clamp(Number(payload?.right) || 0, -1, 1);
-  }
-
-  setQHeld(client, payload) {
-    const p = this.state.players.get(client.sessionId);
-    const rt = this.runtime.get(client.sessionId);
-    if (!p || !rt || this.state.phase !== 'fight' || p.y > 0.08) return;
-    const held = Boolean(payload?.held);
-    if (held && !rt.qHeld && p.action === 'idle' && rt.stunUntil <= Date.now()) {
-      rt.qHeld = true;
-      rt.comboElapsed = 0;
-      rt.comboHits = 1;
-      rt.comboIndex = 0;
-      p.action = 'combo';
-      p.actionT = 0;
-      p.actionStep = 0;
-      rt.forward = 0; rt.right = 0;
-    } else if (!held) {
-      rt.qHeld = false;
+    if (!rt || this.state.phase !== 'fight' || !Array.isArray(payload)) return;
+    const count = Math.min(payload.length, CMD_BATCH_MAX);
+    for (let i = 0; i < count; i++) {
+      const cmd = decodeCmd(payload[i]);
+      if (!cmd || cmd.seq <= rt.queuedSeq) continue;
+      rt.queuedSeq = cmd.seq;
+      rt.queue.push(cmd);
     }
+    rt.lastCmdAt = Date.now();
+    // A backlog this deep is stale input; skip ahead to the newest commands.
+    if (rt.queue.length > CMD_QUEUE_MAX) rt.queue.splice(0, rt.queue.length - CMD_BUFFER_TARGET);
   }
 
-  startCharge(client) {
-    const p = this.state.players.get(client.sessionId);
-    const rt = this.runtime.get(client.sessionId);
-    const canCastFrom = p && (p.action === 'idle' || p.action === 'run' || (p.action === 'jump' && p.y > 0.08));
-    if (!p || !rt || this.state.phase !== 'fight' || !canCastFrom || this.nowCooldown(rt) > 0 || rt.stunUntil > Date.now()) return;
-    const palm = PALMS[p.activePalm];
-    if (!palm || palm.effect === 'copy' || palm.charge <= 0) return;
-    p.action = 'charge';
-    p.actionT = 0;
-    p.charge = 0;
-    rt.chargeElapsed = 0;
-    rt.chargeLockedY = p.y;
-    rt.forward = 0; rt.right = 0;
-    this.broadcast('charge-begin', { ownerId: client.sessionId, palm: p.activePalm });
-  }
-
-  cancelCharge(client) {
-    const p = this.state.players.get(client.sessionId);
-    const rt = this.runtime.get(client.sessionId);
-    if (!p || !rt || p.action !== 'charge') return;
-    p.action = 'idle';
-    p.charge = 0;
-    p.actionT = 0;
-    rt.chargeElapsed = 0;
-    this.broadcast('charge-cancel', { ownerId: client.sessionId });
-  }
-
-  jump(client) {
-    const p = this.state.players.get(client.sessionId);
-    const rt = this.runtime.get(client.sessionId);
-    if (!p || !rt || this.state.phase !== 'fight' || p.action !== 'idle' && p.action !== 'run' && p.action !== 'jump') return;
-    if (rt.jumps >= 2 || (p.y < 0.01 && rt.jumps >= 1)) return;
-    rt.jumps += 1;
-    rt.grounded = false;
-    rt.vy = rt.jumps === 1 ? 8.0 : 7.0;
-    p.jumps = rt.jumps;
-    p.action = 'jump';
-    p.actionT = 0;
-    this.broadcast('jump-effect', { ownerId: client.sessionId, double: rt.jumps === 2 });
-  }
-
-  dash(client, payload) {
-    const p = this.state.players.get(client.sessionId);
-    const rt = this.runtime.get(client.sessionId);
-    if (!p || !rt || this.state.phase !== 'fight' || p.y > 0.08 || p.action !== 'idle' && p.action !== 'run') return;
-    const now = Date.now();
-    if (rt.slowUntil > now || rt.dashElapsed > 0 || rt.dashCooldownUntil > now) return;
-    const x = clamp(Number(payload?.x) || 0, -1, 1);
-    const z = clamp(Number(payload?.z) || 0, -1, 1);
-    const length = Math.hypot(x, z);
-    if (length < 0.2) return;
-    rt.dashX = x / length;
-    rt.dashZ = z / length;
-    rt.dashElapsed = 0.17;
-    rt.dashCooldownUntil = now + 3000;
-    p.action = 'dash';
-    p.actionT = 0;
-    rt.forward = 0; rt.right = 0;
-  }
-
-  nowCooldown(rt) {
-    return Math.max(0, (rt.cooldownUntil - Date.now()) / 1000);
-  }
-
-  tick(dt) {
+  update(deltaMs) {
     const phase = this.state.phase;
-    if (phase === 'waiting' || phase === 'end') return;
-    if (phase === 'select') {
-      this.state.prepLeft = Math.max(0, this.state.prepLeft - dt);
-      const entries = [...this.state.players.entries()];
-      const everyoneReady = entries.length === 2 && entries.every(([, player]) => player.ready);
-      if (this.state.prepLeft <= 0 || everyoneReady) {
-        if (entries.length !== 2) return;
-        for (const [id, player] of entries) {
-          if (player.palm === 'xiao') {
-            const other = entries.find(([otherId]) => otherId !== id)?.[1];
-            player.activePalm = other?.palm && other.palm !== 'xiao' ? other.palm : 'chi';
-          } else {
-            player.activePalm = player.palm;
-          }
-        }
-        for (const player of this.state.players.values()) player.ready = true;
-        this.state.phase = 'fight';
-        this.state.timeLeft = MATCH_SECONDS;
-        this.broadcast('fight-begins', { duration: MATCH_SECONDS });
-      }
+    if (phase === 'select') this.stepSelect(Math.min(0.06, deltaMs / 1000));
+    if (phase !== 'fight') {
+      this.tickDebt = 0;
       return;
     }
+    // Combat advances in fixed 60 Hz ticks so every command a client predicted
+    // with is replayed here with exactly the same timestep.
+    this.tickDebt = Math.min(this.tickDebt + deltaMs / 1000, MAX_CATCH_UP_SECONDS);
+    while (this.tickDebt >= TICK_DT && this.state.phase === 'fight') {
+      this.tickDebt -= TICK_DT;
+      this.fixedTick();
+    }
+  }
 
-    this.state.timeLeft = Math.max(0, this.state.timeLeft - dt);
-    const ids = [...this.state.players.keys()];
-    for (const id of ids) {
+  stepSelect(dt) {
+    this.state.prepLeft = Math.max(0, this.state.prepLeft - dt);
+    const entries = [...this.state.players.entries()];
+    const everyoneReady = entries.length === 2 && entries.every(([, player]) => player.ready);
+    if (this.state.prepLeft > 0 && !everyoneReady) return;
+    if (entries.length !== 2) return;
+    for (const [id, player] of entries) {
+      if (player.palm === 'xiao') {
+        const other = entries.find(([otherId]) => otherId !== id)?.[1];
+        player.activePalm = other?.palm && other.palm !== 'xiao' ? other.palm : 'chi';
+      } else {
+        player.activePalm = player.palm;
+      }
+    }
+    for (const [id, player] of entries) {
+      player.ready = true;
+      const rt = this.runtime.get(id);
+      if (!rt) continue;
+      rt.fighter.palm = player.activePalm;
+      rt.queue.length = 0;
+      rt.budget = 0;
+      rt.lastCmdAt = Date.now();
+    }
+    this.state.phase = 'fight';
+    this.state.timeLeft = MATCH_SECONDS;
+    this.broadcast('fight-begins', { duration: MATCH_SECONDS });
+  }
+
+  fixedTick() {
+    this.state.timeLeft = Math.max(0, this.state.timeLeft - TICK_DT);
+    this.state.clock += TICK_DT;
+    for (const id of [...this.state.players.keys()]) {
       const p = this.state.players.get(id);
       const rt = this.runtime.get(id);
-      if (!p || !rt) continue;
-      this.stepPlayer(id, p, rt, dt);
+      if (p && rt) this.stepPlayer(id, p, rt);
     }
-    this.stepProjectiles(dt);
+    this.stepProjectiles(TICK_DT);
+    // Hits move fighters after their own step, so publish positions last.
+    for (const [id, p] of this.state.players) {
+      const rt = this.runtime.get(id);
+      if (rt) this.syncPlayer(p, rt.fighter);
+    }
+    this.tickCount += 1;
+    if (this.tickCount % ACK_EVERY_TICKS === 0) this.sendAcks();
     if (this.state.timeLeft <= 0 && this.state.phase === 'fight') {
       const [a, b] = [...this.state.players.entries()];
       const winner = !a || !b ? a?.[0] ?? '' : a[1].score === b[1].score ? '' : a[1].score > b[1].score ? a[0] : b[0];
@@ -332,172 +295,111 @@ export class FightRoom extends Room {
     }
   }
 
-  stepPlayer(id, p, rt, dt) {
+  stepPlayer(id, p, rt) {
     const now = Date.now();
-    p.actionT += dt;
-    p.cooldown = this.nowCooldown(rt);
-    p.slowT = Math.max(0, (rt.slowUntil - now) / 1000);
     p.burnT = Math.max(0, (rt.burnUntil - now) / 1000);
-
     if (rt.burnUntil > now && now >= rt.burnNextAt) {
       p.score += 1;
       rt.burnNextAt = now + 1000;
     }
 
-    if (p.action === 'charge') {
-      const palm = PALMS[p.activePalm];
-      rt.chargeElapsed += dt;
-      p.charge = clamp(rt.chargeElapsed / palm.charge, 0, 1);
-      p.y = rt.chargeLockedY;
-      if (rt.chargeElapsed >= palm.charge) {
-        this.launchPalm(id, p, rt, palm);
-      }
-      return;
+    rt.budget = Math.min(CMD_BUDGET_MAX, rt.budget + CMD_BUDGET_PER_TICK);
+    let ran = false;
+    while (rt.queue.length && rt.budget >= 1 && (!ran || rt.queue.length > CMD_BUFFER_TARGET)) {
+      const cmd = rt.queue.shift();
+      rt.budget -= 1;
+      rt.lastSeq = cmd.seq;
+      this.runCmd(id, rt, cmd);
+      ran = true;
     }
+    if (!ran && !rt.queue.length && now - rt.lastCmdAt > CMD_SILENCE_MS) this.runCmd(id, rt, NEUTRAL_CMD);
+  }
 
-    if (p.action === 'combo') {
-      rt.comboElapsed += dt;
-      if (rt.qHeld && rt.comboElapsed >= 0.28) rt.comboHits = 3;
-      const marks = [0.18, 0.69, 1.20];
-      if (rt.comboIndex < rt.comboHits && rt.comboElapsed >= marks[rt.comboIndex]) {
-        rt.comboIndex += 1;
-        p.actionStep = rt.comboIndex;
-        this.meleeStrike(id, p, rt, rt.comboIndex);
-      }
-      const endAt = rt.comboHits === 1 ? 0.66 : 1.58;
-      if (rt.comboElapsed >= endAt) {
-        p.action = 'idle'; p.actionT = 0;
-        rt.comboElapsed = 0; rt.comboIndex = 0; rt.qHeld = false;
-      }
-      return;
-    }
-
-    if (rt.stunUntil > now) {
-      p.action = 'stun';
-      p.actionT += dt;
-      rt.forward = 0; rt.right = 0;
-    } else if (p.action === 'stun') {
-      p.action = 'idle'; p.actionT = 0;
-    }
-
-    if (rt.dashElapsed > 0) {
-      const dashStep = Math.min(dt, rt.dashElapsed);
-      this.moveWithCollisions(p, rt.dashX * 16.5 * dashStep, rt.dashZ * 16.5 * dashStep);
-      rt.dashElapsed -= dashStep;
-      p.action = rt.dashElapsed > 0 ? 'dash' : 'idle';
-      if (rt.dashElapsed <= 0) p.actionT = 0;
-    } else if (p.action !== 'stun' && p.action !== 'cast' && p.action !== 'hit') {
-      const speed = rt.slowUntil > now ? 2.9 : 5.6;
-      const f = rt.forward;
-      const r = rt.right;
-      const mag = Math.hypot(f, r);
-      if (mag > 0.08 && p.y < 0.08) {
-        const nf = f / Math.max(1, mag);
-        const nr = r / Math.max(1, mag);
-        const forward = forwardVector(p.yaw, 0);
-        const right = { x: -Math.cos(p.yaw), z: Math.sin(p.yaw) };
-        const dx = (forward.x * nf + right.x * nr) * speed * dt;
-        const dz = (forward.z * nf + right.z * nr) * speed * dt;
-        this.moveWithCollisions(p, dx, dz);
-        if (p.action !== 'jump') p.action = 'run';
-      } else if (p.action !== 'jump') {
-        p.action = 'idle';
-      }
-    }
-
-    if (p.action === 'cast' && p.actionT >= 0.38) {
-      p.action = 'idle';
-      p.actionT = 0;
-    }
-
-    // Server-authoritative gravity, double jump and simple platform landing.
-    if (p.action !== 'charge') {
-      const oldY = p.y;
-      rt.vy -= 20 * dt;
-      let nextY = p.y + rt.vy * dt;
-      let support = 0;
-      for (const prop of ARENA_PROPS) {
-        const inFootprint = Math.abs(p.x - prop.x) < prop.w / 2 - 0.18 && Math.abs(p.z - prop.z) < prop.d / 2 - 0.18;
-        if (inFootprint && rt.vy <= 0 && oldY >= prop.h - 0.08 && nextY <= prop.h) support = Math.max(support, prop.h);
-      }
-      if (nextY <= support) {
-        nextY = support; rt.vy = 0; rt.jumps = 0; rt.grounded = true;
-        p.jumps = 0;
-        if (p.action === 'jump') p.action = 'idle';
-      } else {
-        rt.grounded = false;
-      }
-      p.y = Math.max(0, nextY);
-      if (p.y <= 0) {
-        p.y = 0; rt.vy = 0; rt.jumps = 0; rt.grounded = true; p.jumps = 0;
-        if (p.action === 'jump') p.action = 'idle';
-      }
+  runCmd(id, rt, cmd) {
+    const fighter = rt.fighter;
+    const events = this.events;
+    events.length = 0;
+    stepFighter(fighter, cmd, TICK_DT, events);
+    for (const event of events) {
+      if (event === 'strike') this.meleeStrike(id, fighter);
+      else if (event === 'launch') this.launchPalm(id, fighter);
+      else if (event === 'charge-begin') this.broadcast('charge-begin', { ownerId: id, palm: fighter.palm });
+      else if (event === 'charge-cancel') this.broadcast('charge-cancel', { ownerId: id });
+      else if (event === 'jump') this.broadcast('jump-effect', { ownerId: id, double: fighter.jumps === 2 });
     }
   }
 
-  moveWithCollisions(p, dx, dz) {
-    const nextX = clamp(p.x + dx, -ARENA_LIMIT, ARENA_LIMIT);
-    const nextZ = clamp(p.z + dz, -ARENA_LIMIT, ARENA_LIMIT);
-    // The player's feet must be above a prop before horizontal movement can pass over it.
-    const blockedX = ARENA_PROPS.some((prop) => p.y < prop.h - 0.06 && overlapsProp(nextX, p.z, 0.48, prop));
-    if (!blockedX) p.x = nextX;
-    const blockedZ = ARENA_PROPS.some((prop) => p.y < prop.h - 0.06 && overlapsProp(p.x, nextZ, 0.48, prop));
-    if (!blockedZ) p.z = nextZ;
+  syncPlayer(p, fighter) {
+    p.x = fighter.x; p.y = fighter.y; p.z = fighter.z;
+    p.yaw = fighter.yaw;
+    p.action = fighter.action;
+    p.actionT = fighter.actionT;
+    p.actionStep = fighter.actionStep;
+    p.charge = chargeProgress(fighter);
+    p.cooldown = fighter.cooldown;
+    p.slowT = fighter.slowT;
+    p.jumps = fighter.jumps;
   }
 
-  meleeStrike(id, p, rt, strikeNo) {
-    const targetEntry = [...this.state.players.entries()].find(([otherId]) => otherId !== id);
-    if (!targetEntry) return;
-    const [targetId, target] = targetEntry;
-    const fwd = forwardVector(p.yaw, p.pitch * 0.35);
-    const dx = target.x - p.x;
-    const dy = (target.y + 1.0) - (p.y + 1.0);
-    const dz = target.z - p.z;
+  sendAcks() {
+    for (const client of this.clients) {
+      const rt = this.runtime.get(client.sessionId);
+      if (rt) client.send('ack', [rt.lastSeq, packFighter(rt.fighter)]);
+    }
+  }
+
+  opponentOf(id) {
+    for (const [otherId, player] of this.state.players) {
+      const rt = otherId !== id && this.runtime.get(otherId);
+      if (rt) return { id: otherId, player, rt, fighter: rt.fighter };
+    }
+    return null;
+  }
+
+  meleeStrike(id, fighter) {
+    const target = this.opponentOf(id);
+    if (!target) return;
+    const tf = target.fighter;
+    const fwd = forwardVector(fighter.yaw, 0);
+    const dx = tf.x - fighter.x;
+    const dy = tf.y - fighter.y;
+    const dz = tf.z - fighter.z;
     const d = Math.hypot(dx, dy, dz) || 1;
-    const dot = (dx * fwd.x + dy * fwd.y + dz * fwd.z) / d;
+    const dot = (dx * fwd.x + dz * fwd.z) / d;
     if (d > 2.25 || dot < 0.58 || Math.abs(dy) > 1.5) return;
-    target.score += strikeNo === 3 ? 11 : 8;
-    const tr = this.runtime.get(targetId);
-    if (tr) {
-      this.moveWithCollisions(target, (dx / d) * 0.85, (dz / d) * 0.85);
-      if (target.action === 'charge') {
-        target.charge = 0;
-        tr.chargeElapsed = 0;
-        target.action = 'stun';
-        tr.stunUntil = Date.now() + 260;
-      } else {
-        target.action = 'stun';
-        tr.stunUntil = Date.now() + 190;
-      }
-      tr.forward = 0; tr.right = 0; tr.qHeld = false;
-    }
-    this.broadcast('impact', { palm: 'fist', x: target.x, y: target.y + 1, z: target.z, targetId, score: strikeNo === 3 ? 11 : 8 });
+    const score = fighter.actionStep === 3 ? 11 : 8;
+    target.player.score += score;
+    const wasCharging = tf.action === 'charge';
+    displaceFighter(tf, (dx / d) * 0.85, (dz / d) * 0.85);
+    stunFighter(tf, wasCharging ? 0.26 : 0.19);
+    this.broadcast('impact', { palm: 'fist', x: tf.x, y: tf.y + 1, z: tf.z, targetId: target.id, score });
   }
 
-  launchPalm(id, p, rt, palm) {
-    const targetEntry = [...this.state.players.entries()].find(([otherId]) => otherId !== id);
-    const target = targetEntry?.[1];
+  launchPalm(id, fighter) {
+    const palm = PALMS[fighter.palm];
+    const target = this.opponentOf(id);
     // Target acquisition is computed on the authoritative server. Camera pitch
     // never steers attacks; targets outside +/-25 degrees receive a straight shot.
     let dir = target
-      ? computeAimDirection(p, target, p.yaw, 25)
-      : { ...forwardVector(p.yaw, 0), locked: false };
+      ? computeAimDirection(fighter, target.fighter, fighter.yaw, 25)
+      : { ...forwardVector(fighter.yaw, 0), locked: false };
     // Hỏa Diệm Đao is deliberately a level horizontal blade: its height is
     // fixed so opponents can evade it by jumping or dropping, not strafing.
     if (palm.slash) {
       const horizontalLength = Math.hypot(dir.x, dir.z) || 1;
       dir = { x: dir.x / horizontalLength, y: 0, z: dir.z / horizontalLength, locked: Boolean(dir.locked) };
     }
-    const origin = { x: p.x + dir.x * 0.72, y: p.y + 1.25, z: p.z + dir.z * 0.72 };
     const projectile = {
       id: `${this.roomId}-${this.projectileSeq++}`,
       ownerId: id,
       palmId: palm.id,
-      x: origin.x, y: origin.y, z: origin.z,
+      x: fighter.x + dir.x * 0.72, y: fighter.y + 1.25, z: fighter.z + dir.z * 0.72,
       vx: dir.x * palm.speed, vy: dir.y * palm.speed, vz: dir.z * palm.speed,
       traveled: 0,
       range: palm.range,
       radius: palm.radius,
+      depth: palm.depth ?? 0,
+      terrainRadius: palm.terrainRadius ?? palm.radius,
       score: palm.score,
       knockback: palm.knockback,
       effect: palm.effect,
@@ -509,12 +411,6 @@ export class FightRoom extends Room {
       life: palm.range / palm.speed + 0.5,
     };
     this.projectiles.push(projectile);
-    rt.cooldownUntil = Date.now() + palm.cooldown * 1000;
-    p.cooldown = palm.cooldown;
-    p.charge = 0;
-    p.action = 'cast'; p.actionT = 0;
-    rt.chargeElapsed = 0;
-    if (p.y > 0.08) rt.vy = Math.min(rt.vy, -1.2);
     this.broadcast('projectile', { ...projectile });
   }
 
@@ -528,24 +424,30 @@ export class FightRoom extends Room {
       projectile.x += sx; projectile.y += sy; projectile.z += sz;
       projectile.traveled += Math.hypot(sx, sy, sz);
       projectile.life -= dt;
-      const blocked = projectile.y <= projectile.radius || ARENA_PROPS.some((prop) =>
-        Math.abs(projectile.x - prop.x) < prop.w / 2 + projectile.radius &&
-        Math.abs(projectile.z - prop.z) < prop.d / 2 + projectile.radius &&
-        projectile.y < prop.h + projectile.radius,
+      const solid = projectile.terrainRadius;
+      const blocked = projectile.y <= solid || ARENA_PROPS.some((prop) =>
+        Math.abs(projectile.x - prop.x) < prop.w / 2 + solid &&
+        Math.abs(projectile.z - prop.z) < prop.d / 2 + solid &&
+        projectile.y < prop.h + solid,
       );
-      const targetEntry = [...this.state.players.entries()].find(([id]) => id !== projectile.ownerId);
+      const target = this.opponentOf(projectile.ownerId);
       let hit = false;
-      if (!blocked && targetEntry) {
-        const [targetId, target] = targetEntry;
-        const verticalReach = projectile.slash ? 0.38 : projectile.radius + 0.72;
-        const dx = target.x - projectile.x;
-        const dz = target.z - projectile.z;
-        const dy = target.y + 1.0 - projectile.y;
-        const horizontal = Math.hypot(dx, dz);
-        if (horizontal < projectile.radius + 0.48 && Math.abs(dy) < verticalReach) {
-          this.applyProjectileHit(projectile, targetId, target);
-          hit = true;
+      if (!blocked && target) {
+        const dx = target.fighter.x - projectile.x;
+        const dz = target.fighter.z - projectile.z;
+        const dy = target.fighter.y + 1.0 - projectile.y;
+        if (projectile.depth > 0) {
+          // A flat front: wide and tall across the flight path, shallow along
+          // it, so it cannot be sidestepped or jumped but never reaches behind.
+          const speed = Math.hypot(projectile.vx, projectile.vy, projectile.vz) || 1;
+          const along = (dx * projectile.vx + dy * projectile.vy + dz * projectile.vz) / speed;
+          const acrossSq = dx * dx + dy * dy + dz * dz - along * along;
+          hit = Math.abs(along) < projectile.depth + 0.48 && acrossSq < (projectile.radius + 0.48) ** 2;
+        } else {
+          const verticalReach = projectile.slash ? 0.38 : projectile.radius + 0.72;
+          hit = Math.hypot(dx, dz) < projectile.radius + 0.48 && Math.abs(dy) < verticalReach;
         }
+        if (hit) this.applyProjectileHit(projectile, target);
       }
       if (blocked || hit || projectile.life <= 0 || projectile.traveled >= projectile.range || Math.abs(projectile.x) > ARENA_LIMIT + 2 || Math.abs(projectile.z) > ARENA_LIMIT + 2) {
         this.broadcast('projectile-end', { id: projectile.id, x: projectile.x, y: projectile.y, z: projectile.z, hit });
@@ -556,28 +458,25 @@ export class FightRoom extends Room {
     this.projectiles = survivors;
   }
 
-  applyProjectileHit(projectile, targetId, target) {
-    target.score += projectile.score;
-    const rt = this.runtime.get(targetId);
-    if (rt) {
-      const dx = target.x - projectile.x;
-      const dz = target.z - projectile.z;
-      const d = Math.hypot(dx, dz) || 1;
-      this.moveWithCollisions(target, (dx / d) * projectile.knockback, (dz / d) * projectile.knockback);
-      if (projectile.effect === 'slow') rt.slowUntil = Date.now() + projectile.slowSeconds * 1000;
-      if (projectile.effect === 'burn') {
-        rt.burnUntil = Date.now() + projectile.burnSeconds * 1000;
-        rt.burnNextAt = Date.now() + 1000;
-      }
-      // Every successful hit interrupts charge and briefly prevents an immediate counter.
-      if (target.action === 'charge' || projectile.effect === 'interrupt') {
-        target.action = 'stun'; target.charge = 0;
-        rt.chargeElapsed = 0;
-        rt.stunUntil = Date.now() + 260;
-      }
-      rt.forward = 0; rt.right = 0; rt.qHeld = false;
+  applyProjectileHit(projectile, target) {
+    const tf = target.fighter;
+    target.player.score += projectile.score;
+    // A flat front shoves along its flight path; other palms push away from their core.
+    let dx = projectile.depth > 0 ? projectile.vx : tf.x - projectile.x;
+    let dz = projectile.depth > 0 ? projectile.vz : tf.z - projectile.z;
+    const d = Math.hypot(dx, dz) || 1;
+    dx /= d; dz /= d;
+    const wasCharging = tf.action === 'charge';
+    displaceFighter(tf, dx * projectile.knockback, dz * projectile.knockback);
+    if (projectile.effect === 'slow') tf.slowT = projectile.slowSeconds;
+    if (projectile.effect === 'burn') {
+      target.rt.burnUntil = Date.now() + projectile.burnSeconds * 1000;
+      target.rt.burnNextAt = Date.now() + 1000;
     }
-    this.broadcast('impact', { palm: projectile.palmId, x: target.x, y: target.y + 1, z: target.z, targetId, score: projectile.score, effect: projectile.effect });
+    // Every successful hit interrupts charge and briefly prevents an immediate counter.
+    if (wasCharging || projectile.effect === 'interrupt') stunFighter(tf, 0.26);
+    else tf.comboHeld = false;
+    this.broadcast('impact', { palm: projectile.palmId, x: tf.x, y: tf.y + 1, z: tf.z, targetId: target.id, score: projectile.score, effect: projectile.effect });
   }
 
   endMatch(winnerSessionId, reason) {

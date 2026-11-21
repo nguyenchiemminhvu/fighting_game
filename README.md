@@ -30,7 +30,7 @@ Các lệnh hữu ích:
 
 ```bash
 npm run check   # kiểm tra cú pháp các module JavaScript phía server/game
-npm test        # kiểm thử luật phòng, chiêu thức, đấu trường và auto-aim
+npm test        # kiểm thử luật phòng, chiêu thức, đấu trường, auto-aim và mô phỏng chuyển động
 npm run build   # build client vào dist/
 npm start       # chạy server; nếu dist/ tồn tại server cũng phục vụ frontend
 ```
@@ -47,9 +47,11 @@ npm start       # chạy server; nếu dist/ tồn tại server cũng phục v�
 | Q (nhấn) | Một chiêu quyền pháp |
 | Q (giữ) | Chuỗi quyền pháp tối đa ba đòn, đấm / đá xen kẽ |
 | C (giữ) | Vận khí và tự động phát chưởng khi đủ thời gian |
-| Space | Nhảy; nhấn lần hai khi đang trên không để khinh công |
+| Space | Nhảy; nhấn lần hai khi đang trên không để khinh công. Cú nhảy giữ nguyên vận tốc đang chạy |
 
-Camera ở góc nhìn sau-vai, cao hơn vai một chút; kéo chuột đổi hướng nhìn độc lập với góc nâng/hạ của camera. Di chuyển ngang A/D được quy chiếu theo trục màn hình của camera. Bộ pháp có hồi chiêu 3 giây. Trong khi ra chiêu, nhân vật bị khóa điều khiển di chuyển; ngoại lệ là lướt bằng bộ pháp. Khi ở trên không, không thể dùng quyền pháp hoặc bộ pháp, nhưng có thể giữ C để vận khí chưởng. Nhân vật được giữ tại độ cao hiện tại trong lúc vận khí trên không, rồi rơi xuống sau khi chưởng được phát.
+Camera ở góc nhìn sau-vai, cao hơn vai một chút; kéo chuột đổi hướng nhìn độc lập với góc nâng/hạ của camera. Di chuyển ngang A/D được quy chiếu theo trục màn hình của camera. Bộ pháp có hồi chiêu 3 giây. Trong khi ra chiêu, nhân vật bị khóa điều khiển di chuyển; ngoại lệ là lướt bằng bộ pháp.
+
+Khi bật nhảy, nhân vật mang theo vận tốc chạy lúc rời đất (đứng yên thì nhảy thẳng đứng). Vận tốc ngang đó bị khoá cho đến khi chạm đất — kể cả khi khinh công lần hai — nên phải chọn hướng trước khi nhảy. Khi ở trên không, không thể dùng quyền pháp hoặc bộ pháp, nhưng có thể giữ C để vận khí chưởng: nhân vật đứng yên tại độ cao hiện tại trong lúc vận khí, mất hết quán tính, rồi rơi thẳng xuống sau khi chưởng được phát. Chạy áp sát rồi nhảy để lên bục, đá hoặc tường thấp và di chuyển trên đó.
 
 ## 4. Luật và nội dung đã có
 
@@ -61,7 +63,17 @@ Camera ở góc nhìn sau-vai, cao hơn vai một chút; kéo chuột đổi hư
 - Kết thúc trận, game tự chuyển về sảnh.
 - Quyền pháp chung có chuỗi tối đa ba hit, xen kẽ hoạt ảnh đấm / đá; mỗi hit có khoảng giãn để đối thủ phục hồi.
 - Chưởng pháp: Nhất Dương Chỉ, Giáng Long Chưởng, Hàn Băng Chưởng, Hoả Diệm Đao, Đại Lực Kim Cang Chưởng và Tiểu Vô Tướng Công. Hiệu ứng đạn có tạo hình riêng: tia laser, rồng khí uốn lượn, cụm tinh thể băng, lưỡi hỏa diệm và ấn bàn tay kim cang.
-- Đấu trường có giới hạn di chuyển, trụ, tường, đá và bục; các vật cản đứng yên, có thể nhảy lên bục, đạn chưởng bị triệt tiêu khi va vật cản.
+
+  | Chưởng | Vận khí | Hồi phục | Tầm |
+  |---|---|---|---|
+  | Nhất Dương Chỉ | 0,2s | 1,33s | Xa |
+  | Giáng Long Chưởng | 1,0s | 3,33s | Xa |
+  | Hàn Băng Chưởng | 0,53s | 2,67s | Trung |
+  | Hoả Diệm Đao | 0,4s | 2,0s | Trung |
+  | Đại Lực Kim Cang Chưởng | 0,53s | 2,67s | Gần, vùng rất rộng |
+
+- Đại Lực Kim Cang Chưởng là một bàn tay khổng lồ (bán kính 3,6 quanh đường bay): không né ngang hay nhảy qua được, chỉ có thể lùi ra khỏi tầm. Vùng trúng là một mặt phẳng dày theo hướng bay nên không đánh trúng người đứng sau lưng; chỉ phần lõi nhỏ của chưởng bị địa hình triệt tiêu.
+- Đấu trường có giới hạn di chuyển, trụ, tường, đá và bục; các vật cản đứng yên, có thể nhảy lên đứng và di chuyển trên bục / đá / tường thấp, đạn chưởng bị triệt tiêu khi va vật cản.
 
 ## 5. Kiến trúc
 
@@ -77,6 +89,17 @@ Node.js + Colyseus
 ```
 
 Server quyết định trạng thái phòng, bộ đếm, vị trí, vận khí, hồi chiêu, va chạm đòn đánh và điểm. Client lo render Babylon.js, camera, hiệu ứng hình ảnh và gửi input. Không có DB nên server restart sẽ xóa trạng thái phòng và trận hiện tại.
+
+### Đồng bộ chuyển động
+
+Chuyển động của võ sinh được mô phỏng bởi một module xác định dùng chung cho cả hai phía (`src/game/fighter.js`), chạy theo tick cố định 60 Hz:
+
+- **Lệnh điều khiển (`cmds`)**: mỗi tick client đóng gói một lệnh có số thứ tự (hướng WASD, góc nhìn, trạng thái giữ Q / C, nhảy, bộ pháp) và gửi cho server. Server xếp hàng và chạy lại đúng từng lệnh với cùng bước thời gian.
+- **Dự đoán phía client**: client áp dụng lệnh lên bản mô phỏng của chính mình ngay lập tức, nên nhân vật phản hồi tức thì, không chờ một vòng mạng.
+- **Đối chiếu với server (`ack`)**: 30 lần mỗi giây server gửi trạng thái chuẩn kèm số thứ tự lệnh đã xử lý. Client nhận trạng thái đó, chạy lại các lệnh chưa được xác nhận, và phần chênh lệch (ví dụ khi bị đánh lùi) được làm mượt dần thay vì giật vị trí.
+- **Nội suy đối thủ**: đối thủ được vẽ trễ 100 ms, nội suy giữa hai snapshot theo đồng hồ mô phỏng của server (`state.clock`), nên chuyển động đều kể cả khi gói tin đến không đều.
+- **Render**: vị trí vẽ được nội suy giữa hai tick mô phỏng nên mượt ở mọi tần số quét; camera bám theo vị trí đã làm mượt; khớp tay chân chuyển tư thế bằng làm mượt theo thời gian thực và nhịp chân theo đúng quãng đường đi được.
+- **Chống gian lận tốc độ**: server chỉ xử lý lệnh theo thời gian thực đã trôi qua (cộng một khoảng bù trễ nhỏ); client im lặng quá 250 ms sẽ được mô phỏng với input trung tính.
 
 ## 6. Deploy đề xuất: Railway (một service)
 
@@ -124,6 +147,9 @@ Tài liệu chính thức tham khảo: [GitHub — tạo repository](https://doc
 ```text
 src/
   game/       # Babylon.js scene, input, client rendering, luật dùng chung
+              #   rules.js   – hằng số phòng, chưởng pháp, vật cản
+              #   fighter.js – mô phỏng võ sinh xác định, dùng chung client/server
+              #   arena.js   – render, dự đoán phía client, nội suy
   ui/         # React lobby, prep screen, HUD và kết quả
   style.css   # giao diện
 server/
@@ -135,7 +161,7 @@ server/
 ## 8. Giới hạn của bản prototype
 
 - Nhân vật và đấu trường hiện dựng bằng hình học procedural / primitive mesh; chưa có model humanoid rigged, motion capture hoặc bộ animation kung-fu chất lượng sản xuất. Các chuyển động, vòng vận khí và hiệu ứng chưởng là procedural để prototype gameplay. Giáng Long có pha xoay thân riêng trên model (không xoay camera), sau đó thu khí về tay và phóng rồng khí.
-- Va chạm nhân vật, bục và đòn đánh được mô phỏng bằng logic server gọn nhẹ; Havok đang bật cho vật lý cảnh tĩnh ở client, chưa phải một hệ thống ragdoll / character controller Havok đầy đủ. Bộ pháp có thời gian hồi chiêu 3 giây; chế độ hỗ trợ ngắm mục tiêu 25° là khóa hướng tại thời điểm phóng, không phải đạn tự đuổi theo đối thủ.
+- Va chạm nhân vật, bục và đòn đánh được mô phỏng bằng logic gọn nhẹ dùng chung giữa server và client (`fighter.js`); Havok đang bật cho vật lý cảnh tĩnh ở client, chưa phải một hệ thống ragdoll / character controller Havok đầy đủ. Bộ pháp có thời gian hồi chiêu 3 giây; chế độ hỗ trợ ngắm mục tiêu 25° là khóa hướng tại thời điểm phóng, không phải đạn tự đuổi theo đối thủ.
 - Sáu phòng hiện là sáu phòng cố định trên một tiến trình Node; chưa có Redis/presence để scale nhiều server.
 - Cần kiểm thử thực tế với hai trình duyệt / độ trễ mạng và cân bằng lại điểm, tầm đánh, knockback trước khi mở public.
 - Hiệu ứng, animation và cân bằng combat là bản nền để tiếp tục thay asset/điều chỉnh, không phải sản phẩm thương mại đã QA.

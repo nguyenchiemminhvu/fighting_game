@@ -15,10 +15,10 @@ test('match and selection timers match the game specification', () => {
 
 test('all five selectable palm techniques and the copy technique exist', () => {
   assert.deepEqual(Object.keys(PALMS).sort(), ['bang', 'chi', 'hoa', 'kim', 'long', 'xiao']);
-  assert.equal(PALMS.chi.charge, 0.3);
-  assert.equal(PALMS.chi.cooldown, 2);
-  assert.equal(PALMS.long.charge, 1.5);
-  assert.equal(PALMS.long.cooldown, 5);
+  assert.equal(PALMS.chi.charge, 0.2);
+  assert.equal(PALMS.chi.cooldown, 1.33);
+  assert.equal(PALMS.long.charge, 1);
+  assert.equal(PALMS.long.cooldown, 3.33);
   assert.equal(PALMS.bang.slowSeconds, 5);
   assert.equal(PALMS.hoa.burnSeconds, 3);
   assert.equal(PALMS.xiao.effect, 'copy');

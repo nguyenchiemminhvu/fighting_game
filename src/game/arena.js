@@ -9,6 +9,33 @@ import { HavokPlugin } from '@babylonjs/core/Physics/v2/Plugins/havokPlugin';
 import { PhysicsAggregate } from '@babylonjs/core/Physics/v2/physicsAggregate';
 import { PhysicsShapeType } from '@babylonjs/core/Physics/v2/IPhysicsEnginePlugin';
 import { ARENA_PROPS, PALMS } from './rules.js';
+import {
+  DASH_KEYS, RUN_SPEED, TICK_DT,
+  chargeProgress, encodeCmd, stepFighter, unpackFighter,
+} from './fighter.js';
+
+// Remote fighters are drawn slightly in the past so there are always two
+// server snapshots to interpolate between.
+const INTERP_DELAY = 0.1;
+const SNAPSHOT_LIMIT = 30;
+// Prediction corrections are blended away instead of snapping the fighter.
+const ERROR_DECAY = 14;
+const ERROR_SNAP_DISTANCE = 9;
+const MAX_FRAME_SECONDS = 0.25;
+const MAX_PENDING_CMDS = 180;
+const STRIDE_PER_UNIT = 2.15;
+
+const clamp1 = (value) => Math.max(-1, Math.min(1, value));
+const damp = (current, target, rate, dt) => current + (target - current) * (1 - Math.exp(-rate * dt));
+const angleDelta = (from, to) => Math.atan2(Math.sin(to - from), Math.cos(to - from));
+
+function restPose() {
+  return {
+    legL: 0, legR: 0, armLx: 0, armRx: 0, armLz: -0.12, armRz: 0.12,
+    torsoX: 0, torsoZ: 0, leanX: 0, leanZ: 0,
+  };
+}
+const POSE_KEYS = Object.keys(restPose());
 
 const FORWARD = (yaw) => ({ x: -Math.sin(yaw), z: -Math.cos(yaw) });
 // Babylon's third-person camera uses the opposite horizontal screen-right axis
@@ -120,7 +147,13 @@ function buildFighter(scene, shadowGenerator, id, name, palette) {
   }
   return {
     root, torso, robe, armL, armR, sleeveL, sleeveR, legL, legR, aura, chargeRing, chargeRing2, qiOrb,
-    parts, target: new Vector3(0, 0, 0), lastAction: 'idle',
+    parts,
+    // `view` is where and how the fighter is drawn this frame; `pose` eases
+    // towards `poseTarget` so limbs flow between stances instead of snapping.
+    view: { x: 0, y: 0, z: 0, yaw: 0, action: 'idle', actionT: 0, actionStep: 0, palm: 'chi' },
+    pose: restPose(), poseTarget: restPose(),
+    placed: false, lastX: 0, lastY: 0, lastZ: 0, velX: 0, velY: 0, velZ: 0,
+    bodyYaw: 0, stride: 0, gait: 0, lastAction: null, actionStartedAt: 0,
   };
 }
 
@@ -199,11 +232,6 @@ function buildArena(scene, roomKey, shadowGenerator) {
   return { ground, props, ring, hallBack, hallRoof, mapName: roomKey };
 }
 
-function lerpAngle(a, b, t) {
-  let diff = (b - a + Math.PI) % (Math.PI * 2) - Math.PI;
-  return a + diff * t;
-}
-
 export async function mountArena(canvas, room, roomKey, callbacks = {}) {
   const engine = new Engine(canvas, true, { antialias: true, stencil: true, adaptToDeviceRatio: true, preserveDrawingBuffer: false });
   const scene = new Scene(engine);
@@ -249,12 +277,22 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
   let dragging = false;
   let pointerLocked = false;
   let lastMouse = { x: 0, y: 0 };
-  let lastNetSend = 0;
+  let lastFrameAt = performance.now();
   let lastHudSend = 0;
   let disposed = false;
   const keys = new Set();
   const lastTap = new Map();
-  const chargeKeys = new Set();
+  // Local fighter prediction: `sim` runs ahead of the server on our own input,
+  // `pending` holds the commands the server has not acknowledged yet.
+  const net = {
+    sim: null, prev: { x: 0, y: 0, z: 0 }, pending: [], seq: 0, accumulator: 0,
+    errX: 0, errY: 0, errZ: 0, jump: false, dash: 0, tapQ: false, tapC: false,
+  };
+  const snapshots = new Map();
+  let clockOffset = null;
+  let lastSnapshotClock = -1;
+  const before = { x: 0, y: 0, z: 0 };
+  const after = { x: 0, y: 0, z: 0 };
 
   function ensureFighter(id, player, index) {
     if (fighters.has(id)) return fighters.get(id);
@@ -283,7 +321,9 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
     if (fx.has(data.id)) return;
     const palm = PALMS[data.palmId] ?? PALMS.chi;
     const root = new TransformNode(`palm-fx-${data.id}`, scene);
-    root.position.set(data.x, data.y, data.z);
+    const visualScale = palm.visualScale ?? 1;
+    // An enlarged effect is raised so it towers over the ground instead of sinking into it.
+    root.position.set(data.x, data.y + (visualScale - 1) * 0.45, data.z);
     const velocity = new Vector3(data.vx, data.vy, data.vz);
     const direction = velocity.lengthSquared() > 1e-6 ? velocity.normalize() : new Vector3(0, 0, 1);
     root.lookAt(root.position.add(direction));
@@ -366,14 +406,16 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
         addEffectMesh(parts, flame, main, root);
       }
     } else if (palm.id === 'kim') {
-      // Large palm-shaped qi seal: palm pad, four fingers and an opposing thumb.
-      const gold = addEffectMaterial(materials, `kim-gold-${data.id}`, '#f5d78c', 0.96);
+      // Giant palm-shaped qi seal: palm pad, four fingers and an opposing thumb.
+      // Kept translucent so the caster can still see through it.
+      const gold = addEffectMaterial(materials, `kim-gold-${data.id}`, '#f5d78c', 0.8);
+      const fingerGlow = addEffectMaterial(materials, `kim-finger-${data.id}`, '#fff3cf', 0.82);
       const palmPad = MeshBuilder.CreateSphere(`kim-palm-${data.id}`, { diameter: 1, segments: 14 }, scene);
       palmPad.scaling.set(0.48, 0.38, 0.12); addEffectMesh(parts, palmPad, gold, root);
       for (let i = 0; i < 4; i++) {
         const finger = MeshBuilder.CreateCapsule(`kim-finger-${data.id}-${i}`, { height: 0.56 - i * 0.035, radius: 0.075, tessellation: 8 }, scene);
         finger.position.set(-0.31 + i * 0.205, 0.37 + Math.sin(i / 3 * Math.PI) * 0.04, 0.015);
-        addEffectMesh(parts, finger, bright, root);
+        addEffectMesh(parts, finger, fingerGlow, root);
       }
       const thumb = MeshBuilder.CreateCapsule(`kim-thumb-${data.id}`, { height: 0.48, radius: 0.085, tessellation: 8 }, scene);
       thumb.position.set(-0.51, -0.02, 0); thumb.rotation.z = -0.78; addEffectMesh(parts, thumb, gold, root);
@@ -384,7 +426,7 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
       addEffectMesh(parts, orb, main, root);
     }
 
-    fx.set(data.id, { root, materials, parts, body, data: { ...data }, life: data.life, age: 0 });
+    fx.set(data.id, { root, materials, parts, body, data: { ...data }, life: data.life, age: 0, visualScale });
   }
 
   function burst(x, y, z, color = '#e8d4a9') {
@@ -394,6 +436,78 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
     rings.push({ mesh, material, life: 0.48, max: 0.48 });
   }
 
+  // Each state patch becomes a timestamped snapshot of the remote fighters.
+  // `clockOffset` maps our clock onto the server's simulation clock, smoothed
+  // so that uneven packet arrival does not show up as uneven motion.
+  function recordSnapshots() {
+    const players = state?.players;
+    if (!players || state.phase !== 'fight') {
+      snapshots.clear();
+      return;
+    }
+    const clock = Number(state.clock) || 0;
+    if (clock <= lastSnapshotClock) return;
+    lastSnapshotClock = clock;
+    const sample = clock - performance.now() / 1000;
+    clockOffset = clockOffset === null || Math.abs(sample - clockOffset) > 0.5
+      ? sample
+      : clockOffset + (sample - clockOffset) * 0.08;
+    for (const [id, player] of players.entries()) {
+      if (id === localId) continue;
+      let buffer = snapshots.get(id);
+      if (!buffer) snapshots.set(id, buffer = []);
+      buffer.push({ t: clock, x: player.x, y: player.y, z: player.z, yaw: player.yaw });
+      if (buffer.length > SNAPSHOT_LIMIT) buffer.shift();
+    }
+  }
+
+  function predictedPosition(out) {
+    const alpha = net.accumulator / TICK_DT;
+    out.x = net.prev.x + (net.sim.x - net.prev.x) * alpha;
+    out.y = net.prev.y + (net.sim.y - net.prev.y) * alpha;
+    out.z = net.prev.z + (net.sim.z - net.prev.z) * alpha;
+  }
+
+  function rememberPosition() {
+    net.prev.x = net.sim.x; net.prev.y = net.sim.y; net.prev.z = net.sim.z;
+  }
+
+  function resetPrediction() {
+    net.sim = null;
+    net.pending.length = 0;
+    net.accumulator = 0;
+    net.errX = 0; net.errY = 0; net.errZ = 0;
+    net.jump = false; net.dash = 0; net.tapQ = false; net.tapC = false;
+  }
+
+  // Server reconciliation: adopt the authoritative fighter, then replay every
+  // command it has not processed yet. Any difference from what was on screen
+  // becomes a visual offset that decays, so corrections glide instead of pop.
+  function reconcile(message) {
+    if (state?.phase !== 'fight' || !Array.isArray(message)) return;
+    const [ackSeq, values] = message;
+    const wasPredicting = Boolean(net.sim);
+    if (wasPredicting) predictedPosition(before);
+    net.sim = unpackFighter(values, net.sim ?? undefined);
+    let acked = 0;
+    while (acked < net.pending.length && net.pending[acked].seq <= ackSeq) acked++;
+    if (acked) net.pending.splice(0, acked);
+    rememberPosition();
+    for (const cmd of net.pending) {
+      rememberPosition();
+      stepFighter(net.sim, cmd);
+    }
+    if (!wasPredicting) return;
+    predictedPosition(after);
+    net.errX += before.x - after.x;
+    net.errY += before.y - after.y;
+    net.errZ += before.z - after.z;
+    if (Math.hypot(net.errX, net.errY, net.errZ) > ERROR_SNAP_DISTANCE) {
+      net.errX = 0; net.errY = 0; net.errZ = 0;
+    }
+  }
+
+  room.onMessage('ack', reconcile);
   room.onMessage('projectile', spawnProjectile);
   room.onMessage('projectile-end', (data) => {
     const effect = fx.get(data.id);
@@ -408,19 +522,89 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
   room.onMessage('charge-begin', (data) => callbacks.onMessage?.('charge-begin', data));
   room.onMessage('charge-cancel', (data) => callbacks.onMessage?.('charge-cancel', data));
   room.onMessage('match-end', (data) => callbacks.onMessage?.('match-end', data));
-  room.onStateChange((newState) => { state = newState; });
+  room.onStateChange((newState) => { state = newState; recordSnapshots(); });
 
-  function sendInput(now) {
-    if (now - lastNetSend < 50) return;
-    lastNetSend = now;
+  function readCmd() {
     let forward = 0; let right = 0;
     if (keys.has('KeyW')) forward += 1;
     if (keys.has('KeyS')) forward -= 1;
     if (keys.has('KeyD')) right += 1;
     if (keys.has('KeyA')) right -= 1;
-    const mag = Math.hypot(forward, right);
-    if (mag > 1) { forward /= mag; right /= mag; }
-    room.send('input', { forward, right, yaw, pitch: 0 });
+    const cmd = {
+      seq: ++net.seq, f: forward, r: right, yaw,
+      q: keys.has('KeyQ') || net.tapQ, c: keys.has('KeyC') || net.tapC, jump: net.jump, dash: net.dash,
+    };
+    net.jump = false;
+    net.dash = 0;
+    net.tapQ = false;
+    net.tapC = false;
+    return cmd;
+  }
+
+  // Advance the local fighter in fixed ticks, immediately and without waiting
+  // for the server; the same commands are sent for the server to replay.
+  function stepPrediction(delta) {
+    if (state?.phase !== 'fight') {
+      if (net.sim) resetPrediction();
+      return false;
+    }
+    if (!net.sim) return false;
+    net.accumulator += delta;
+    const batch = [];
+    while (net.accumulator >= TICK_DT) {
+      net.accumulator -= TICK_DT;
+      const cmd = readCmd();
+      net.pending.push(cmd);
+      batch.push(encodeCmd(cmd));
+      rememberPosition();
+      stepFighter(net.sim, cmd);
+    }
+    if (batch.length) room.send('cmds', batch);
+    if (net.pending.length > MAX_PENDING_CMDS) net.pending.splice(0, net.pending.length - MAX_PENDING_CMDS);
+    const decay = Math.exp(-ERROR_DECAY * delta);
+    net.errX *= decay; net.errY *= decay; net.errZ *= decay;
+    return true;
+  }
+
+  function viewLocal(view) {
+    predictedPosition(view);
+    view.x += net.errX; view.y += net.errY; view.z += net.errZ;
+    view.yaw = yaw;
+    view.action = net.sim.action;
+    view.actionT = net.sim.actionT;
+    view.actionStep = net.sim.actionStep;
+    view.palm = net.sim.palm;
+  }
+
+  function viewRemote(id, player, view) {
+    view.action = player.action;
+    view.actionT = Number(player.actionT) || 0;
+    view.actionStep = Number(player.actionStep) || 0;
+    view.palm = player.activePalm || player.palm;
+    const buffer = snapshots.get(id);
+    let from = player;
+    let to = null;
+    let blend = 0;
+    if (buffer && buffer.length > 1 && clockOffset !== null) {
+      const time = performance.now() / 1000 + clockOffset - INTERP_DELAY;
+      let next = buffer.length - 1;
+      if (time < buffer[next].t) {
+        while (next > 0 && buffer[next - 1].t > time) next--;
+        from = buffer[Math.max(0, next - 1)];
+        if (next > 0) {
+          to = buffer[next];
+          blend = (time - from.t) / (to.t - from.t);
+        }
+      }
+    }
+    if (to) {
+      view.x = from.x + (to.x - from.x) * blend;
+      view.y = from.y + (to.y - from.y) * blend;
+      view.z = from.z + (to.z - from.z) * blend;
+      view.yaw = from.yaw + angleDelta(from.yaw, to.yaw) * blend;
+    } else {
+      view.x = from.x; view.y = from.y; view.z = from.z; view.yaw = from.yaw;
+    }
   }
 
   function moveLook(dx, dy) {
@@ -428,17 +612,6 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
     // Natural vertical mouse look: move up to look up, move down to look down.
     // Keep keyboard ArrowUp / ArrowDown behavior independent and unchanged.
     pitch = Math.max(-0.72, Math.min(0.72, pitch - dy * 0.0019));
-  }
-
-  function dashFromKey(code) {
-    let f = 0; let r = 0;
-    if (code === 'KeyW') f = 1;
-    if (code === 'KeyS') f = -1;
-    if (code === 'KeyA') r = -1;
-    if (code === 'KeyD') r = 1;
-    const forward = FORWARD(yaw);
-    const right = RIGHT(yaw);
-    return { x: forward.x * f + right.x * r, z: forward.z * f + right.z * r };
   }
 
   function onKeyDown(event) {
@@ -451,37 +624,26 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
     }
     if (event.repeat) return;
     if (event.code.startsWith('Key') && !['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyC'].includes(event.code)) return;
+    // Held keys (WASD, Q, C) are sampled into every command; presses that must
+    // not be missed between ticks (jump, double-tap dash) are latched here.
     keys.add(event.code);
-    if (event.code === 'KeyQ') room.send('q-held', { held: true });
-    if (event.code === 'KeyC') {
-      chargeKeys.add(event.code);
-      room.send('charge-start');
-    }
-    if (event.code === 'Space') room.send('jump');
-    if (['KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(event.code)) {
+    if (!net.sim) return;
+    if (event.code === 'Space') net.jump = true;
+    if (event.code === 'KeyQ') net.tapQ = true;
+    if (event.code === 'KeyC') net.tapC = true;
+    if (DASH_KEYS[event.code]) {
       const now = performance.now();
       const previous = lastTap.get(event.code) ?? 0;
-      if (now - previous < 270) {
-        const dir = dashFromKey(event.code);
-        room.send('dash', dir);
-      }
+      if (now - previous < 270) net.dash = DASH_KEYS[event.code];
       lastTap.set(event.code, now);
     }
   }
 
   function onKeyUp(event) {
     keys.delete(event.code);
-    if (event.code === 'KeyQ') room.send('q-held', { held: false });
-    if (event.code === 'KeyC') {
-      chargeKeys.delete(event.code);
-      room.send('charge-cancel');
-    }
   }
   function onBlur() {
     keys.clear();
-    room.send('q-held', { held: false });
-    if (chargeKeys.size) room.send('charge-cancel');
-    chargeKeys.clear();
   }
   function onPointerDown(event) {
     if (event.button !== 0) return;
@@ -511,126 +673,179 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
   canvas.addEventListener('pointerdown', onPointerDown);
   canvas.addEventListener('contextmenu', onContextMenu);
 
-  function updateModel(model, player, now) {
-    const target = model.target;
-    target.set(player.x, player.y, player.z);
-    const local = model.root.metadata?.local;
-    const smoothing = local ? 0.48 : 0.24;
-    model.root.position = Vector3.Lerp(model.root.position, target, smoothing);
-    const baseBodyYaw = player.yaw + Math.PI; // rig's local forward axis is +Z.
-    // Reconstruct action time locally from the last authoritative state change.
-    // This gives the long palm's 360-degree sweep fluid 60-fps motion between
-    // Colyseus snapshots instead of stepping at the network patch rate.
-    if (model.lastAction !== player.action) {
-      model.lastAction = player.action;
-      model.actionStartedAt = now - (Number(player.actionT) || 0) * 1000;
+  function updateModel(model, view, now, dt) {
+    if (!model.placed) {
+      model.placed = true;
+      model.lastX = view.x; model.lastY = view.y; model.lastZ = view.z;
+      model.bodyYaw = view.yaw + Math.PI; // rig's local forward axis is +Z.
     }
-    const visualActionT = Math.max(0, (now - (model.actionStartedAt || now)) / 1000);
-    const runPhase = now * 0.012;
-    const running = player.action === 'run';
-    const jumping = player.action === 'jump' || player.y > 0.06;
-    const charging = player.action === 'charge';
-    const activePalm = player.activePalm || player.palm;
-    const combo = player.action === 'combo';
-    const dash = player.action === 'dash';
-    const hit = player.action === 'stun';
-    const step = Number(player.actionStep || 0);
-    const swing = running ? Math.sin(runPhase) : 0;
-    model.legL.pivot.rotation.x = swing * 0.66 + (jumping ? -0.52 : 0);
-    model.legR.pivot.rotation.x = -swing * 0.66 + (jumping ? -0.52 : 0);
-    model.armL.pivot.rotation.x = -swing * 0.55;
-    model.armR.pivot.rotation.x = swing * 0.55;
-    model.armL.pivot.rotation.z = -0.12;
-    model.armR.pivot.rotation.z = 0.12;
-    model.torso.rotation.z = dash ? -0.22 : jumping ? 0.05 : hit ? Math.sin(now * 0.06) * 0.08 : 0;
-    model.torso.rotation.y = 0;
-    if (combo) {
-      const punch = Math.max(0, Math.sin((visualActionT * 7.5) % Math.PI));
+    // Animation follows the motion that is actually drawn, so the stride always
+    // matches ground speed for predicted and interpolated fighters alike.
+    const perSecond = dt > 1e-4 ? 1 / dt : 0;
+    const velocityBlend = 1 - Math.exp(-20 * dt);
+    model.velX += ((view.x - model.lastX) * perSecond - model.velX) * velocityBlend;
+    model.velY += ((view.y - model.lastY) * perSecond - model.velY) * velocityBlend;
+    model.velZ += ((view.z - model.lastZ) * perSecond - model.velZ) * velocityBlend;
+    model.lastX = view.x; model.lastY = view.y; model.lastZ = view.z;
+    const fwd = FORWARD(view.yaw);
+    const right = RIGHT(view.yaw);
+    const speed = Math.hypot(model.velX, model.velZ);
+    const along = model.velX * fwd.x + model.velZ * fwd.z;
+    const across = model.velX * right.x + model.velZ * right.z;
+
+    // Reconstruct action time locally from the last state change. This gives
+    // long moves fluid per-frame motion instead of stepping at the network rate.
+    const action = view.action;
+    if (model.lastAction !== action) {
+      model.lastAction = action;
+      model.actionStartedAt = now - view.actionT * 1000;
+    }
+    const actionT = Math.max(0, (now - model.actionStartedAt) / 1000);
+    const onFoot = action === 'idle' || action === 'run';
+    const charging = action === 'charge';
+    const step = view.actionStep;
+
+    model.gait = damp(model.gait, onFoot ? Math.min(1, speed / RUN_SPEED) : 0, 12, dt);
+    model.stride += Math.min(speed, RUN_SPEED * 1.2) * STRIDE_PER_UNIT * dt * (along < -0.5 ? -1 : 1);
+    const swing = Math.sin(model.stride) * model.gait;
+    const bob = Math.abs(Math.cos(model.stride)) * 0.04 * model.gait;
+
+    const target = model.poseTarget;
+    Object.assign(target, restPose());
+    let rate = 16;
+    let spin = 0;
+
+    if (onFoot) {
+      // Lean into the direction of travel.
+      target.leanX = clamp1(along / RUN_SPEED) * 0.1;
+      target.leanZ = -clamp1(across / RUN_SPEED) * 0.08;
+    } else if (action === 'jump') {
+      // Tuck while rising, open up while falling.
+      const rise = clamp1(model.velY / 5);
+      const up = Math.max(0, rise);
+      const down = Math.max(0, -rise);
+      target.legL = -0.2 - 0.6 * up;
+      target.legR = -0.05 - 0.3 * up + 0.25 * down;
+      target.armLx = -0.5 - 0.6 * up;
+      target.armRx = -0.5 - 0.6 * up;
+      target.armLz = -0.3 - 0.55 * down;
+      target.armRz = 0.3 + 0.55 * down;
+      target.leanX = clamp1(along / RUN_SPEED) * 0.14;
+      rate = 14;
+    } else if (action === 'dash') {
+      const unit = speed > 0.5 ? 1 / speed : 0;
+      target.leanX = along * unit * 0.34;
+      target.leanZ = -across * unit * 0.3;
+      target.legL = -0.8;
+      target.legR = 0.55;
+      target.armLx = 0.6;
+      target.armRx = 0.6;
+      target.armLz = -0.35;
+      target.armRz = 0.35;
+      rate = 32;
+    } else if (action === 'stun') {
+      target.leanX = -0.16;
+      target.torsoZ = Math.sin(now * 0.06) * 0.08;
+      target.armLx = 0.25;
+      target.armRx = 0.25;
+      target.armLz = -0.55;
+      target.armRz = 0.55;
+      rate = 30;
+    } else if (action === 'combo') {
+      const punch = Math.max(0, Math.sin((actionT * 7.5) % Math.PI));
       if (step % 2 === 1) {
-        model.armR.pivot.rotation.x = -1.95 * punch - 0.62;
-        model.torso.rotation.x = -0.1 * punch;
+        target.armRx = -1.95 * punch - 0.62;
+        target.torsoX = -0.1 * punch;
       } else {
-        model.legR.pivot.rotation.x = -1.55 * punch;
-        model.armL.pivot.rotation.x = -1.7 * punch;
+        target.legR = -1.55 * punch;
+        target.armLx = -1.7 * punch;
       }
-    }
-    if (charging) {
-      const chargeT = visualActionT;
-      const isDragon = activePalm === 'long';
-      model.aura.isVisible = true;
-      model.chargeRing.isVisible = true;
-      model.chargeRing2.isVisible = true;
-      model.qiOrb.isVisible = true;
+      target.leanX = 0.06;
+      rate = 45;
+    } else if (charging) {
       model.aura.scaling.setAll(1 + Math.sin(now * 0.012) * 0.12);
-      model.chargeRing.rotation.y += 0.035;
-      model.chargeRing2.rotation.x += 0.027;
+      model.chargeRing.rotation.y += 2.1 * dt;
+      model.chargeRing2.rotation.x += 1.6 * dt;
       model.chargeRing.scaling.setAll(0.9 + Math.sin(now * 0.009) * 0.08);
-      if (isDragon) {
-        // First 0.42 s: sweep the arms and turn the body a full 360 degrees.
-        // Then pull the released ambient qi back into the palms for the thrust.
-        const sweep = Math.min(1, chargeT / 0.42);
-        const gather = Math.max(0, Math.min(1, (chargeT - 0.42) / 0.78));
-        model.root.rotation.y = baseBodyYaw + sweep * Math.PI * 2;
-        if (chargeT < 0.42) {
-          model.armL.pivot.rotation.x = -0.18;
-          model.armR.pivot.rotation.x = -0.18;
-          model.armL.pivot.rotation.z = -0.82;
-          model.armR.pivot.rotation.z = 0.82;
-          model.torso.rotation.x = -0.04;
+      if (view.palm === 'long') {
+        // The opening of the charge sweeps the arms through a full body turn;
+        // the rest pulls the released ambient qi back into the palms.
+        const chargeSeconds = PALMS.long.charge;
+        const sweepSeconds = chargeSeconds * 0.28;
+        const sweep = Math.min(1, actionT / sweepSeconds);
+        const gather = Math.max(0, Math.min(1, (actionT - sweepSeconds) / (chargeSeconds * 0.52)));
+        spin = sweep * sweep * (3 - 2 * sweep) * Math.PI * 2;
+        if (sweep < 1) {
+          target.armLx = -0.18;
+          target.armRx = -0.18;
+          target.armLz = -0.82;
+          target.armRz = 0.82;
+          target.torsoX = -0.04;
         } else {
-          model.armL.pivot.rotation.x = -1.05 - gather * 0.22;
-          model.armR.pivot.rotation.x = -1.05 - gather * 0.22;
-          model.armL.pivot.rotation.z = -0.5 * (1 - gather);
-          model.armR.pivot.rotation.z = 0.5 * (1 - gather);
-          model.torso.rotation.x = -0.08 * gather;
+          target.armLx = -1.05 - gather * 0.22;
+          target.armRx = -1.05 - gather * 0.22;
+          target.armLz = -0.5 * (1 - gather);
+          target.armRz = 0.5 * (1 - gather);
+          target.torsoX = -0.08 * gather;
         }
         model.qiOrb.position.set(0, 1.45, 0.22 + gather * 0.48);
         model.qiOrb.scaling.setAll(0.18 + gather * 1.08 + Math.sin(now * 0.025) * 0.05);
         model.chargeRing.material.alpha = 0.28 + gather * 0.42;
       } else {
-        model.root.rotation.y = lerpAngle(model.root.rotation.y, baseBodyYaw, 0.32);
-        model.armL.pivot.rotation.x = -1.18;
-        model.armR.pivot.rotation.x = -1.18;
-        model.armL.pivot.rotation.z = -0.3;
-        model.armR.pivot.rotation.z = 0.3;
+        target.armLx = -1.18;
+        target.armRx = -1.18;
+        target.armLz = -0.3;
+        target.armRz = 0.3;
         model.qiOrb.position.set(0.12, 1.42, 0.36);
         model.qiOrb.scaling.setAll(0.45 + Math.sin(now * 0.018) * 0.13);
       }
-    } else {
-      model.root.rotation.y = lerpAngle(model.root.rotation.y, baseBodyYaw, 0.32);
-      model.aura.isVisible = false;
-      model.chargeRing.isVisible = false;
-      model.chargeRing2.isVisible = false;
-      model.qiOrb.isVisible = false;
-      model.torso.rotation.x = jumping ? -0.02 : 0;
-    }
-    if (player.action === 'cast') {
-      const palm = activePalm;
-      if (palm === 'long') {
-        model.armR.pivot.rotation.x = -2.42;
-        model.armL.pivot.rotation.x = -2.12;
-        model.torso.rotation.x = -0.18;
-      } else if (palm === 'chi') {
-        model.armR.pivot.rotation.x = -2.5;
-        model.armR.pivot.rotation.z = -0.05;
-        model.armL.pivot.rotation.x = -0.55;
-      } else if (palm === 'hoa') {
-        model.armR.pivot.rotation.x = -1.95;
-        model.armR.pivot.rotation.z = -0.72;
-        model.armL.pivot.rotation.x = -0.35;
-      } else if (palm === 'kim') {
-        model.armR.pivot.rotation.x = -2.15;
-        model.armL.pivot.rotation.x = -2.15;
-        model.torso.rotation.x = -0.12;
+      rate = 24;
+    } else if (action === 'cast') {
+      if (view.palm === 'long') {
+        target.armRx = -2.42;
+        target.armLx = -2.12;
+        target.torsoX = -0.18;
+      } else if (view.palm === 'chi') {
+        target.armRx = -2.5;
+        target.armRz = -0.05;
+        target.armLx = -0.55;
+      } else if (view.palm === 'hoa') {
+        target.armRx = -1.95;
+        target.armRz = -0.72;
+        target.armLx = -0.35;
+      } else if (view.palm === 'kim') {
+        target.armRx = -2.15;
+        target.armLx = -2.15;
+        target.torsoX = -0.12;
       } else {
-        model.armR.pivot.rotation.x = -2.15;
-        model.armL.pivot.rotation.x = -0.6;
+        target.armRx = -2.15;
+        target.armLx = -0.6;
       }
+      rate = 40;
     }
-    if (player.action === 'jump') {
-      model.armL.pivot.rotation.x = -0.95; model.armR.pivot.rotation.x = -0.95;
-    }
-    model.robe.rotation.y = Math.sin(now * 0.002 + (player.x || 0)) * 0.025;
+    model.aura.isVisible = charging;
+    model.chargeRing.isVisible = charging;
+    model.chargeRing2.isVisible = charging;
+    model.qiOrb.isVisible = charging;
+
+    // Ease every joint towards its target with a frame-rate independent blend.
+    const pose = model.pose;
+    const blend = 1 - Math.exp(-rate * dt);
+    for (const key of POSE_KEYS) pose[key] += (target[key] - pose[key]) * blend;
+
+    model.legL.pivot.rotation.x = pose.legL + swing * 0.7;
+    model.legR.pivot.rotation.x = pose.legR - swing * 0.7;
+    model.armL.pivot.rotation.x = pose.armLx - swing * 0.58;
+    model.armR.pivot.rotation.x = pose.armRx + swing * 0.58;
+    model.armL.pivot.rotation.z = pose.armLz;
+    model.armR.pivot.rotation.z = pose.armRz;
+    model.torso.rotation.x = pose.torsoX;
+    model.torso.rotation.z = pose.torsoZ;
+    model.robe.rotation.y = Math.sin(now * 0.002 + view.x) * 0.025;
+
+    model.bodyYaw += angleDelta(model.bodyYaw, view.yaw + Math.PI) * (1 - Math.exp(-28 * dt));
+    model.root.position.set(view.x, view.y + bob, view.z);
+    model.root.rotation.set(pose.leanX, model.bodyYaw + spin, pose.leanZ);
   }
 
   function updateCameraKeys(delta) {
@@ -642,44 +857,51 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
     if (keys.has('ArrowDown')) pitch = Math.max(-0.72, pitch - lookSpeed * delta);
   }
 
+  const lookTarget = new Vector3();
+
   function render() {
     if (disposed) return;
     const now = performance.now();
-    const delta = Math.min(0.05, engine.getDeltaTime() / 1000 || 0.016);
+    const delta = Math.min(MAX_FRAME_SECONDS, Math.max(0, (now - lastFrameAt) / 1000));
+    lastFrameAt = now;
     updateCameraKeys(delta);
-    sendInput(now);
+    const predicting = stepPrediction(delta);
     const players = state?.players;
-    const localPlayer = localId && players?.get(localId);
     if (players) {
       let index = 0;
       const liveIds = new Set();
       for (const [id, player] of players.entries()) {
         liveIds.add(id);
         const model = ensureFighter(id, player, index++);
-        model.root.metadata = { ...(model.root.metadata ?? {}), local: id === localId };
-        updateModel(model, player, now);
+        if (id === localId && predicting) viewLocal(model.view);
+        else viewRemote(id, player, model.view);
+        updateModel(model, model.view, now, delta);
       }
       for (const [id, model] of fighters.entries()) {
         if (!liveIds.has(id)) {
           model.root.dispose(false, true);
           fighters.delete(id);
+          snapshots.delete(id);
         }
       }
-      if (localPlayer) {
+      // The camera rides the same smoothed position the local fighter is drawn
+      // at, never the raw network state.
+      const anchor = fighters.get(localId)?.view;
+      if (anchor) {
         const fwd = FORWARD(yaw);
-        const shoulderRight = { x: Math.cos(yaw), z: -Math.sin(yaw) };
-        const cameraAnchor = new Vector3(localPlayer.x, localPlayer.y, localPlayer.z);
+        const shoulderX = Math.cos(yaw);
+        const shoulderZ = -Math.sin(yaw);
         camera.position.set(
-          cameraAnchor.x - fwd.x * 4.7 + shoulderRight.x * 0.62,
-          cameraAnchor.y + 2.2,
-          cameraAnchor.z - fwd.z * 4.7 + shoulderRight.z * 0.62,
+          anchor.x - fwd.x * 4.7 + shoulderX * 0.62,
+          anchor.y + 2.2,
+          anchor.z - fwd.z * 4.7 + shoulderZ * 0.62,
         );
         // Aim the camera over the near shoulder, not down the spell's barrel.
         // Pitch affects only this view point; the server keeps combat aim separate.
-        const lookTarget = new Vector3(
-          cameraAnchor.x + fwd.x * 5.4,
-          cameraAnchor.y + 1.55 + Math.tan(pitch) * 5.4,
-          cameraAnchor.z + fwd.z * 5.4,
+        lookTarget.set(
+          anchor.x + fwd.x * 5.4,
+          anchor.y + 1.55 + Math.tan(pitch) * 5.4,
+          anchor.z + fwd.z * 5.4,
         );
         camera.setTarget(lookTarget);
       }
@@ -691,19 +913,28 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
           timeLeft: Math.ceil(state.timeLeft),
           winnerSessionId: state.winnerSessionId,
           resultReason: state.resultReason,
-          players: [...players.entries()].map(([id, p]) => ({
-            id, name: p.name, score: p.score, action: p.action, palm: p.activePalm,
-            selectedPalm: p.palm, ready: p.ready, charge: p.charge, cooldown: p.cooldown,
-            slowT: p.slowT, burnT: p.burnT, x: p.x, y: p.y, z: p.z,
-          })),
+          players: [...players.entries()].map(([id, p]) => {
+            // Our own charge bar and cooldown react instantly from the prediction.
+            const own = id === localId && predicting ? net.sim : null;
+            return {
+              id, name: p.name, score: p.score, palm: p.activePalm,
+              selectedPalm: p.palm, ready: p.ready,
+              action: own ? own.action : p.action,
+              charge: own ? chargeProgress(own) : p.charge,
+              cooldown: own ? own.cooldown : p.cooldown,
+              slowT: p.slowT, burnT: p.burnT, x: p.x, y: p.y, z: p.z,
+            };
+          }),
           localId,
         });
       }
     }
 
-    for (const [id, effect] of fx.entries()) {
+    for (const effect of fx.values()) {
       const d = effect.data;
-      effect.root.position.addInPlace(new Vector3(d.vx, d.vy, d.vz).scale(delta));
+      effect.root.position.x += d.vx * delta;
+      effect.root.position.y += d.vy * delta;
+      effect.root.position.z += d.vz * delta;
       effect.life -= delta;
       effect.age += delta;
       if (effect.body.length) {
@@ -721,6 +952,10 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
       if (d.palmId === 'hoa') {
         const pulse = 0.92 + Math.sin(effect.age * 28) * 0.08;
         effect.root.scaling.set(pulse, pulse, 1);
+      }
+      // Enlarged effects swell out of the caster's hand over the first instant.
+      if (effect.visualScale !== 1) {
+        effect.root.scaling.setAll(effect.visualScale * Math.min(1, 0.4 + effect.age * 6));
       }
     }
     for (let i = rings.length - 1; i >= 0; i--) {
