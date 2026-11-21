@@ -278,7 +278,7 @@ export function App() {
         <header className="lobby-header">
           <div className="brand-mark"><span>武</span></div>
           <div className="brand-copy"><span className="eyebrow">VÕ LÂM · SONG ĐẤU TRỰC TUYẾN</span><h1>GIANG HỒ <em>TỈ THÍ</em></h1></div>
-          <div className="header-status"><span className="status-dot" /> KHÔNG CẦN ĐĂNG NHẬP</div>
+          <div className="header-status"><span className="status-dot" /> PHÂN TÀI CAO THẤP</div>
         </header>
 
         <section className="lobby-hero">
@@ -286,7 +286,7 @@ export function App() {
             <span className="eyebrow">MỘT SÀN ĐẤU · HAI CAO THỦ</span>
             <h2>Luận kiếm bằng<br /><em>võ học chân truyền.</em></h2>
             <p>Chọn một võ đài còn chỗ, chờ đối thủ hoặc bước vào trận tỉ thí. Không tài khoản, không lưu tiến trình — chỉ có võ công và bản lĩnh.</p>
-            <div className="hero-tags"><span>✦ WEBGL 3D</span><span>✦ 1 VS 1</span><span>✦ 05:00 / TRẬN</span></div>
+            <div className="hero-tags"><span>✦ 1 VS 1</span><span>✦ 05:00 / TRẬN</span></div>
           </div>
           <div className="hero-art" aria-hidden="true">
             <div className="moon-disc" />
@@ -328,17 +328,17 @@ export function App() {
         </section>
 
         <section className="lobby-guide">
-          <div className="guide-heading"><span className="eyebrow">NHẬP MÔN</span><h2>Quy tắc tỉ thí</h2></div>
+          <div className="guide-heading"><span className="eyebrow">NHẬP MÔN</span><h2>Các bộ kỹ năng</h2></div>
           <div className="guide-grid">
-            <div><span className="guide-icon">拳</span><h3>Quyền pháp</h3><p>Nhấn Q ra một đòn. Giữ Q để nối tối đa ba đòn quyền cước, có nhịp ngắt cho đối thủ phản ứng.</p></div>
-            <div><span className="guide-icon">掌</span><h3>Chưởng pháp</h3><p>Chọn một trong sáu tuyệt kỹ trước trận. Giữ C vận khí, mỗi chưởng có tốc độ, tầm đánh và hồi chiêu riêng.</p></div>
+            <div><span className="guide-icon">拳</span><h3>Quyền pháp</h3><p>Nhấn Q ra một đòn. Giữ Q để nối tối đa ba đòn quyền cước.</p></div>
+            <div><span className="guide-icon">掌</span><h3>Chưởng pháp</h3><p>Chọn một trong sáu tuyệt kỹ trước trận. Giữ C vận khí, mỗi chưởng có tốc độ, tầm đánh, hồi chiêu và sức sát thương riêng.</p></div>
             <div><span className="guide-icon">步</span><h3>Bộ pháp</h3><p>WASD di chuyển. Nhấn đúp cùng một hướng để lướt nhanh. Nhấn Space để nhảy, nhấn lần hai để khinh công.</p></div>
           </div>
         </section>
 
         <footer className="lobby-footer">
-          <label className="name-field"><span>Danh xưng trên võ đài</span><input value={name} maxLength={20} onChange={(event) => setName(event.target.value)} /><small>Tên tạm thời, chỉ tồn tại trong trận này.</small></label>
-          <div className="footer-notes"><span>KHÔNG LƯU ĐIỂM · KHÔNG ĐĂNG NHẬP · KHÔNG CHO XEM TRẬN</span><small>Giang Hồ Tỉ Thí · WebGL / Babylon.js / Colyseus</small></div>
+          <label className="name-field"><span>Quý tính đại danh</span><input value={name} maxLength={20} onChange={(event) => setName(event.target.value)} /><small>Tên tạm thời, chỉ tồn tại trong trận này.</small></label>
+          <div className="footer-notes"><span>THẮNG BẠI TẠI KỸ NĂNG</span><small>Giang Hồ Tỉ Thí · WebGL / Babylon.js / Colyseus</small></div>
         </footer>
       </div>
     </main>
