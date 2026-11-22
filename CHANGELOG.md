@@ -74,3 +74,9 @@ Giao thức mạng thay đổi: các message `input`, `q-held`, `charge-start`, 
 - Một võ sinh không tìm kiếm giao tranh đủ 30 giây sẽ bị xử thua; nếu cả hai cùng chạm ngưỡng trong cùng tick thì cả hai cùng bị xử thua, không có người chiến thắng. Thông báo xử thua: “Các hạ liên tục né tránh giao tranh. Thật hèn nhát!”.
 - Bảng kết quả chỉ còn tên và trạng thái thắng / thua, không hiển thị HP còn lại.
 - Bổ sung unit test cho tốc độ lùi, góc nhìn ±45°, cự ly Kim Cang và reset điều kiện giao tranh.
+
+## Lobby online count
+- Replaced the home-page "PHÂN TÀI CAO THẤP" label with the live count of anonymous sessions currently on the lobby screen.
+- Added a lightweight lobby presence heartbeat API. Entering an arena marks the browser session inactive; returning to the lobby resumes its heartbeat.
+- Added server-side sequence checks and a 15-second TTL so delayed requests and abandoned tabs do not leave stale online counts.
+- Kept the online indicator visible on mobile layouts.

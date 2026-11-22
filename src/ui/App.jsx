@@ -33,6 +33,7 @@ function getRoomStatus(room) {
 export function App() {
   const [screen, setScreen] = useState('lobby');
   const [rooms, setRooms] = useState([]);
+  const [onlineCount, setOnlineCount] = useState(0);
   const [name, setName] = useState(makeName);
   const [loadingRooms, setLoadingRooms] = useState(true);
   const [joining, setJoining] = useState('');
@@ -47,6 +48,13 @@ export function App() {
   const roomRef = useRef(null);
   const arenaRef = useRef(null);
   const returnTimerRef = useRef(null);
+  const lobbyPresenceRef = useRef(null);
+  if (!lobbyPresenceRef.current) {
+    const id = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `lobby-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    lobbyPresenceRef.current = { id, sequence: 0 };
+  }
 
   const fetchRooms = useCallback(async () => {
     try {
@@ -54,6 +62,7 @@ export function App() {
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       setRooms(data.rooms ?? []);
+      setOnlineCount(Number.isFinite(data.onlineCount) ? data.onlineCount : 0);
       setError((current) => current.startsWith('Không thể tải') ? '' : current);
     } catch {
       setError('Không thể tải danh sách phòng. Hãy kiểm tra server Colyseus đã chạy chưa.');
@@ -68,6 +77,26 @@ export function App() {
     const timer = window.setInterval(fetchRooms, 1600);
     return () => window.clearInterval(timer);
   }, [screen, fetchRooms]);
+
+  useEffect(() => {
+    if (screen !== 'lobby') return undefined;
+    const presence = lobbyPresenceRef.current;
+    const reportPresence = (active) => {
+      presence.sequence += 1;
+      fetch(`${SERVER_URL}/api/lobby/presence`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: presence.id, sequence: presence.sequence, active }),
+        keepalive: true,
+      }).catch(() => { /* The server expires missed heartbeats automatically. */ });
+    };
+    reportPresence(true);
+    const heartbeat = window.setInterval(() => reportPresence(true), 5000);
+    return () => {
+      window.clearInterval(heartbeat);
+      reportPresence(false);
+    };
+  }, [screen]);
 
   const returnToLobby = useCallback(async (leave = true) => {
     if (returnTimerRef.current) window.clearTimeout(returnTimerRef.current);
@@ -391,7 +420,7 @@ export function App() {
         <header className="lobby-header">
           <div className="brand-mark"><span>武</span></div>
           <div className="brand-copy"><span className="eyebrow">VÕ LÂM · SONG ĐẤU TRỰC TUYẾN</span><h1>GIANG HỒ <em>TỈ THÍ</em></h1></div>
-          <div className="header-status"><span className="status-dot" /> PHÂN TÀI CAO THẤP</div>
+          <div className="header-status" aria-live="polite" title="Chỉ tính người đang ở sảnh, không tính người trong đấu trường"><span className="status-dot" /><strong>{onlineCount}</strong><span>NGƯỜI ĐANG Ở SẢNH</span></div>
         </header>
 
         <section className="lobby-hero">

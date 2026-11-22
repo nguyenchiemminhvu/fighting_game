@@ -9,7 +9,7 @@
     "build": "vite build",
     "start": "node server/index.js",
     "preview": "vite preview --host 0.0.0.0",
-    "check": "node --check server/index.js && node --check server/FightRoom.js && node --check src/game/rules.js && node --check src/game/fighter.js && node --check src/game/spectatorCameras.js && node --check src/game/arena.js",
+    "check": "node --check server/index.js && node --check server/LobbyPresence.js && node --check server/FightRoom.js && node --check src/game/rules.js && node --check src/game/fighter.js && node --check src/game/spectatorCameras.js && node --check src/game/arena.js",
     "test": "node --test"
   },
   "dependencies": {

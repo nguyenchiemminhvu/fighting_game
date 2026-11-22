@@ -7,6 +7,7 @@ Prototype game đối kháng võ thuật 3D 1-vs-1 chạy trên trình duyệt b
 - Physics scene: Babylon.js Physics V2 + Havok (fallback to visual scene if Havok cannot initialize).
 - No account, no database, no saved progress.
 - Six fixed rooms; each room has at most two fighters and ten read-only spectators.
+- The lobby header shows active lobby sessions only; fighter and spectator sessions are excluded.
 
 ## 1. Yêu cầu
 
@@ -53,6 +54,13 @@ Camera ở góc nhìn sau-vai, cao hơn vai một chút; kéo chuột đổi hư
 
 Khi bật nhảy, nhân vật mang theo vận tốc chạy lúc rời đất (đứng yên thì nhảy thẳng đứng). Vận tốc ngang đó bị khoá cho đến khi chạm đất — kể cả khi khinh công lần hai — nên phải chọn hướng trước khi nhảy. Khi ở trên không, không thể dùng quyền pháp hoặc bộ pháp, nhưng có thể giữ C để vận khí chưởng: nhân vật đứng yên tại độ cao hiện tại trong lúc vận khí, mất hết quán tính, rồi rơi thẳng xuống sau khi chưởng được phát. Chạy áp sát rồi nhảy để lên bục, đá hoặc tường thấp và di chuyển trên đó.
 
+## Số người đang ở sảnh
+
+- Trang chủ gửi heartbeat 5 giây một lần khi đang ở màn hình sảnh; khi vào đấu trường (dù là võ sinh hay người xem), client đánh dấu session không còn ở sảnh.
+- `GET /api/rooms` trả thêm trường `onlineCount`; số này chỉ đếm session đang active ở sảnh, không cộng người trong đấu trường.
+- Server tự hết hạn session nếu không nhận heartbeat trong 15 giây, tránh giữ số online cũ khi tab hoặc trình duyệt bị đóng đột ngột.
+- Việc đếm dùng session ẩn danh theo tab, không yêu cầu tài khoản và không lưu tiến trình game.
+
 ## Chế độ người xem
 
 - Mỗi võ đài có tối đa 2 võ sinh và 10 người xem. Người vào khi hai võ sinh đã chiếm chỗ sẽ nhận vai trò người xem; khi phòng còn một chỗ võ sinh thì người vào vẫn là võ sinh thứ hai.
@@ -95,7 +103,7 @@ Node.js + Colyseus
        |-- 6 fixed FightRoom instances
        |-- authoritative movement / hit detection / HP / knockout
        |-- temporary in-memory state only
-       `-- Express: /api/rooms, /health, static dist/
+       `-- Express: /api/rooms, /api/lobby/presence, /health, static dist/
 ```
 
 Server quyết định trạng thái phòng, HP, vị trí, vận khí, hồi chiêu, va chạm đòn đánh và kết quả knockout. Client lo render Babylon.js, camera, hiệu ứng hình ảnh và gửi input. Không có DB nên server restart sẽ xóa trạng thái phòng và trận hiện tại.

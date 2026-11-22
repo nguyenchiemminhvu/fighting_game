@@ -32,7 +32,8 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .eyebrow { display: block; color: #bd9a6e; letter-spacing: .18em; font-size: 9px; font-weight: 700; }
 .brand-copy h1 { font: 24px 'Marcellus', Georgia, serif; letter-spacing: .11em; margin: 4px 0 0; color: #f0e4d0; }
 .brand-copy h1 em { color: var(--gold); font-style: normal; }
-.header-status { display: flex; align-items: center; gap: 9px; color: #b2a897; font-size: 9px; letter-spacing: .11em; }
+.header-status { display: flex; align-items: center; gap: 7px; color: #b2a897; font-size: 9px; letter-spacing: .08em; white-space: nowrap; }
+.header-status strong { color: var(--gold-bright); font: 16px 'Marcellus', Georgia, serif; letter-spacing: 0; }
 .status-dot, .room-state i { width: 7px; height: 7px; display: inline-block; border-radius: 100%; background: #8eaf77; box-shadow: 0 0 10px rgba(142,175,119,.42); }
 .lobby-hero { display: grid; grid-template-columns: .95fr 1.05fr; min-height: 330px; align-items: center; border-bottom: 1px solid var(--line); }
 .hero-copy { padding: 44px 0 42px; position: relative; z-index: 2; }
@@ -183,9 +184,11 @@ kbd { padding: 2px 5px; border: 1px solid rgba(206,175,132,.4); color: #e4c18c; 
   .lobby-shell { width: calc(100% - 28px); }
   .lobby-header { height: 74px; gap: 12px; }
   .brand-mark { width: 38px; height: 38px; font-size: 25px; }
-  .brand-copy h1 { font-size: 19px; }
+  .brand-copy h1 { font-size: clamp(14px, 4.7vw, 19px); }
   .brand-copy .eyebrow { font-size: 7px; }
-  .header-status { display: none; }
+  .header-status { gap: 4px; font-size: 6px; letter-spacing: .015em; }
+  .header-status strong { font-size: 12px; }
+  .header-status .status-dot { width: 6px; height: 6px; }
   .lobby-hero { grid-template-columns: 1fr; min-height: 0; }
   .hero-copy { padding: 33px 0 5px; }
   .hero-copy h2 { font-size: 39px; }
