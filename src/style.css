@@ -238,3 +238,45 @@ kbd { padding: 2px 5px; border: 1px solid rgba(206,175,132,.4); color: #e4c18c; 
   .palm-card { min-height: 75px; }
   .palm-description { max-height: 26px; overflow: hidden; }
 }
+
+/* Spectator mode: four fixed arena cameras and read-only match HUD. */
+.room-state.watching { color: #91c7d0; }
+.room-state.watching i { background: #72b8c3; box-shadow: 0 0 9px rgba(114,184,195,.42); }
+.room-slots .viewer-slots { margin-left: 3px; }
+.spectator-topbar { grid-template-columns: minmax(145px, 1fr) 200px minmax(260px, 1.45fr) auto; align-items: center; }
+.spectator-scoreboard { display: flex; align-items: center; justify-content: center; gap: clamp(12px, 2vw, 28px); min-width: 0; }
+.spectator-score { display: grid; grid-template-columns: minmax(72px, 1fr) auto; align-items: center; gap: 2px 10px; min-width: 0; text-shadow: 0 2px 8px #000; }
+.spectator-score span { grid-column: 1 / -1; color: #c6a06d; font-size: 7px; letter-spacing: .15em; font-weight: 700; }
+.spectator-score strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #f3e9d7; font-size: 10px; }
+.spectator-score b { color: #f0d2a0; font: 18px 'Marcellus', Georgia, serif; white-space: nowrap; }
+.spectator-score b small { color: #ada18f; font: 8px 'Be Vietnam Pro', sans-serif; }
+.spectator-controls { position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%); display: flex; align-items: center; gap: 26px; padding: 13px 16px; min-width: min(410px, calc(100% - 28px)); justify-content: space-between; }
+.spectator-controls > div { display: flex; flex-direction: column; gap: 4px; }
+.spectator-controls strong { color: #ead8bc; font-size: 11px; }
+.spectator-controls small { color: #a69884; font-size: 8px; }
+.spectator-camera-button { display: inline-flex; align-items: center; gap: 10px; padding: 10px 12px; background: rgba(109,77,45,.32); border: 1px solid rgba(210,169,110,.5); color: #efc78a; font-size: 9px; white-space: nowrap; cursor: pointer; }
+.spectator-camera-button:hover { background: rgba(109,77,45,.55); border-color: #d2a96e; }
+.spectator-camera-button kbd { font-size: 9px; }
+
+@media (max-width: 900px) {
+  .spectator-topbar { grid-template-columns: minmax(120px, 1fr) 155px minmax(210px, 1.35fr) auto; gap: 10px; }
+  .spectator-scoreboard { gap: 10px; }
+  .spectator-score { gap: 2px 6px; }
+  .spectator-score strong { font-size: 8px; }
+}
+
+@media (max-width: 650px) {
+  .spectator-topbar { grid-template-columns: minmax(0, 1fr) 94px auto; align-items: start; gap: 6px; }
+  .spectator-topbar .match-clock { grid-column: 2; grid-row: 1; }
+  .spectator-topbar .spectator-scoreboard { grid-column: 1 / 3; grid-row: 2; justify-content: flex-start; gap: 14px; padding-top: 7px; }
+  .spectator-topbar .leave-button { grid-column: 3; grid-row: 1; }
+  .spectator-score { grid-template-columns: minmax(62px, 1fr) auto; }
+  .spectator-score span { font-size: 5px; }
+  .spectator-score strong { max-width: 90px; font-size: 7px; }
+  .spectator-score b { font-size: 14px; }
+  .spectator-controls { bottom: 8px; min-width: calc(100% - 16px); gap: 8px; padding: 9px 10px; }
+  .spectator-controls strong { font-size: 9px; }
+  .spectator-controls small { font-size: 7px; }
+  .spectator-camera-button { padding: 8px 9px; font-size: 7px; gap: 6px; }
+  .spectator-camera-button kbd { font-size: 7px; }
+}

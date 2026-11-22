@@ -9,6 +9,7 @@ import {
   clamp,
   computeAimDirection,
 } from '../src/game/rules.js';
+import { getRoomJoinRole, SPECTATOR_LIMIT } from '../src/game/spectatorCameras.js';
 import {
   NEUTRAL_CMD,
   TICK_DT,
@@ -77,12 +78,13 @@ class FightState extends Schema {
     this.roundNo = 0;
     // Simulation time in seconds; clients interpolate remote fighters against it.
     this.clock = 0;
+    this.viewerCount = 0;
   }
 }
 defineTypes(FightState, {
   roomKey: 'string', phase: 'string', prepLeft: 'number', timeLeft: 'number',
   players: { map: PlayerState }, winnerSessionId: 'string', resultReason: 'string', roundNo: 'number',
-  clock: 'number',
+  clock: 'number', viewerCount: 'number',
 });
 
 function safeName(value) {
@@ -101,11 +103,14 @@ export class FightRoom extends Room {
   onCreate(options) {
     this.roomKey = options.roomKey;
     this.roomLabel = options.label;
-    this.maxClients = 2;
+    // Two fighter seats plus up to ten read-only spectator connections.
+    this.maxClients = 2 + SPECTATOR_LIMIT;
     this.autoDispose = false;
     this.patchRate = PATCH_RATE_MS;
     this.setState(new FightState(this.roomKey));
     this.runtime = new Map();
+    this.spectators = new Map();
+    this.ejectingSpectators = false;
     this.projectiles = [];
     this.projectileSeq = 1;
     this.ending = false;
@@ -117,13 +122,40 @@ export class FightRoom extends Room {
 
     this.onMessage('select-palm', (client, payload) => this.selectPalm(client, payload));
     this.onMessage('cmds', (client, payload) => this.queueCmds(client, payload));
+    this.onMessage('request-role', (client) => {
+      const role = this.spectators.has(client.sessionId)
+        ? 'spectator'
+        : this.state.players.has(client.sessionId) ? 'player' : 'unknown';
+      client.send('room-role', { role, cameraCount: 4 });
+    });
+    this.onMessage('spectator-snapshot-request', (client) => {
+      if (!this.spectators.has(client.sessionId)) return;
+      for (const projectile of this.projectiles) client.send('projectile', { ...projectile });
+    });
     this.setSimulationInterval((deltaMs) => this.update(deltaMs));
   }
 
   onJoin(client, options) {
-    if (this.state.players.size >= 2 || this.state.phase === 'end') {
-      throw new Error('Sàn đã đủ hai người.');
+    const role = getRoomJoinRole(
+      this.state.players.size,
+      this.spectators.size,
+      this.state.phase,
+      this.ejectingSpectators,
+    );
+    if (!role) {
+      throw new Error(this.state.players.size >= 2
+        ? 'Sàn đã đủ người xem.'
+        : 'Sàn đấu đang kết thúc hoặc không còn chỗ.');
     }
+
+    if (role === 'spectator') {
+      this.spectators.set(client.sessionId, client);
+      this.state.viewerCount = this.spectators.size;
+      client.send('room-role', { role: 'spectator', cameraCount: 4 });
+      return;
+    }
+
+    client.send('room-role', { role: 'player' });
     const slot = this.state.players.size;
     const player = new PlayerState();
     player.name = safeName(options?.name);
@@ -168,6 +200,14 @@ export class FightRoom extends Room {
   }
 
   onLeave(client) {
+    if (this.spectators.delete(client.sessionId)) {
+      this.state.viewerCount = this.spectators.size;
+      if (this.ejectingSpectators && this.state.players.size === 0 && this.spectators.size === 0) {
+        this.resetWaiting();
+      }
+      return;
+    }
+
     const leaving = this.state.players.get(client.sessionId);
     const previousPhase = this.state.phase;
     this.state.players.delete(client.sessionId);
@@ -177,13 +217,22 @@ export class FightRoom extends Room {
     if (previousPhase === 'select' || previousPhase === 'fight') {
       const remaining = [...this.state.players.keys()][0];
       if (remaining) this.endMatch(remaining, 'forfeit');
-      else this.resetWaiting();
+      else this.ejectSpectators();
     } else if (previousPhase === 'waiting' && this.state.players.size === 0) {
       this.resetWaiting();
     } else if (previousPhase === 'end' && this.state.players.size === 0) {
-      this.scheduleReset();
+      this.ejectSpectators();
     }
     if (leaving) this.broadcast('player-left', { name: leaving.name });
+  }
+
+  ejectSpectators() {
+    if (this.ejectingSpectators) return;
+    this.ejectingSpectators = true;
+    for (const client of this.spectators.values()) {
+      client.send('spectator-eject', { reason: 'match-finished' });
+    }
+    if (this.spectators.size === 0 && this.state.players.size === 0) this.resetWaiting();
   }
 
   onDispose() {
@@ -199,6 +248,11 @@ export class FightRoom extends Room {
       capacity: 2,
       phase: room.state.phase,
       names: [...room.state.players.values()].map((p) => p.name),
+      viewerCount: room.spectators.size,
+      viewerCapacity: SPECTATOR_LIMIT,
+      canWatch: room.state.players.size === 2 && !room.ejectingSpectators
+        && ['select', 'fight', 'end'].includes(room.state.phase)
+        && room.spectators.size < SPECTATOR_LIMIT,
     }));
   }
 
@@ -501,13 +555,17 @@ export class FightRoom extends Room {
   scheduleReset() {
     if (this._endTimer) this.clock.clearTimeout(this._endTimer);
     this._endTimer = this.clock.setTimeout(() => {
-      if (this.state.players.size === 0) this.resetWaiting();
+      if (this.state.players.size === 0 && this.spectators.size === 0) this.resetWaiting();
+      else if (this.state.players.size === 0) this.ejectSpectators();
     }, 9000);
   }
 
   resetWaiting() {
+    if (this.state.players.size > 0 || this.spectators.size > 0) return;
     this.ending = false;
+    this.ejectingSpectators = false;
     this.projectiles = [];
+    this.state.viewerCount = 0;
     this.state.players.clear();
     this.runtime.clear();
     this.state.phase = 'waiting';

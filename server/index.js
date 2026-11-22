@@ -8,6 +8,7 @@ import { Server, matchMaker } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
 import { FightRoom } from './FightRoom.js';
 import { ROOMS } from '../src/game/rules.js';
+import { SPECTATOR_LIMIT } from '../src/game/spectatorCameras.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
@@ -43,6 +44,9 @@ app.get('/api/rooms', (_req, res) => {
         capacity: 2,
         phase: current?.phase ?? 'waiting',
         names: current?.names ?? [],
+        viewerCount: current?.viewerCount ?? 0,
+        viewerCapacity: SPECTATOR_LIMIT,
+        canWatch: current?.canWatch ?? false,
       };
     }),
   });

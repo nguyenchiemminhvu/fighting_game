@@ -6,7 +6,7 @@ Prototype game đối kháng võ thuật 3D 1-vs-1 chạy trên trình duyệt b
 - Multiplayer: Colyseus authoritative rooms over WebSocket.
 - Physics scene: Babylon.js Physics V2 + Havok (fallback to visual scene if Havok cannot initialize).
 - No account, no database, no saved progress.
-- Six fixed rooms; each room has at most two players and no spectator slot.
+- Six fixed rooms; each room has at most two fighters and ten read-only spectators.
 
 ## 1. Yêu cầu
 
@@ -53,14 +53,21 @@ Camera ở góc nhìn sau-vai, cao hơn vai một chút; kéo chuột đổi hư
 
 Khi bật nhảy, nhân vật mang theo vận tốc chạy lúc rời đất (đứng yên thì nhảy thẳng đứng). Vận tốc ngang đó bị khoá cho đến khi chạm đất — kể cả khi khinh công lần hai — nên phải chọn hướng trước khi nhảy. Khi ở trên không, không thể dùng quyền pháp hoặc bộ pháp, nhưng có thể giữ C để vận khí chưởng: nhân vật đứng yên tại độ cao hiện tại trong lúc vận khí, mất hết quán tính, rồi rơi thẳng xuống sau khi chưởng được phát. Chạy áp sát rồi nhảy để lên bục, đá hoặc tường thấp và di chuyển trên đó.
 
+## Chế độ người xem
+
+- Mỗi võ đài có tối đa 2 võ sinh và 10 người xem. Người vào khi hai võ sinh đã chiếm chỗ sẽ nhận vai trò người xem; khi phòng còn một chỗ võ sinh thì người vào vẫn là võ sinh thứ hai.
+- Người xem nhận state và hiệu ứng trận đấu để render, nhưng không được nhận input điều khiển, chọn chưởng pháp hoặc gửi lệnh chiến đấu.
+- Có 4 camera cố định quanh võ đài (Bắc, Đông, Nam, Tây). Mỗi camera đặt ở góc nâng 45° so với mặt sàn và nhìn về tâm võ đài. Nhấn `V` hoặc dùng nút **Góc máy kế tiếp** để chuyển camera.
+- Khi cả hai võ sinh rời phòng sau khi trận kết thúc, server phát sự kiện đưa toàn bộ người xem trở lại hàng chờ.
+
 ## 4. Luật và nội dung đã có
 
-- Sảnh hiển thị sáu phòng cố định với trạng thái trống / đang chờ / đủ người.
-- Phòng có tối đa hai client; client chỉ được join phòng có sẵn, không có spectator.
+- Sảnh hiển thị sáu phòng cố định với trạng thái trống / đang chờ / giao đấu / hết chỗ xem.
+- Mỗi phòng có tối đa 12 client: hai võ sinh và mười người xem; client chỉ được join phòng có sẵn.
 - Khi người thứ hai vào phòng, cả hai có tối đa 10 giây chọn một chưởng pháp; nếu cả hai chọn xong sớm, trận đấu bắt đầu ngay.
 - Trận đấu kéo dài 5 phút. Không có thanh máu; điểm được cộng khi đòn đánh trúng. Hết giờ, người nhiều điểm hơn thắng.
 - Người còn lại thắng nếu đối thủ rời trận giữa chừng.
-- Kết thúc trận, game tự chuyển về sảnh.
+- Võ sinh tự chuyển về sảnh sau khi trận kết thúc; người xem được server đưa về hàng chờ sau khi cả hai võ sinh rời sàn.
 - Quyền pháp chung có chuỗi tối đa ba hit, xen kẽ hoạt ảnh đấm / đá; mỗi hit có khoảng giãn để đối thủ phục hồi.
 - Chưởng pháp: Nhất Dương Chỉ, Giáng Long Chưởng, Hàn Băng Chưởng, Hoả Diệm Đao, Đại Lực Kim Cang Chưởng và Tiểu Vô Tướng Công. Hiệu ứng đạn có tạo hình riêng: tia laser, rồng khí uốn lượn, cụm tinh thể băng, lưỡi hỏa diệm và ấn bàn tay kim cang.
 
@@ -147,13 +154,14 @@ Tài liệu chính thức tham khảo: [GitHub — tạo repository](https://doc
 ```text
 src/
   game/       # Babylon.js scene, input, client rendering, luật dùng chung
+              #   spectatorCameras.js – giới hạn người xem và 4 camera cố định
               #   rules.js   – hằng số phòng, chưởng pháp, vật cản
               #   fighter.js – mô phỏng võ sinh xác định, dùng chung client/server
               #   arena.js   – render, dự đoán phía client, nội suy
   ui/         # React lobby, prep screen, HUD và kết quả
   style.css   # giao diện
 server/
-  FightRoom.js # Colyseus authoritative room / combat
+  FightRoom.js # Colyseus authoritative room / combat / spectator seats
   index.js     # HTTP API, fixed rooms, static frontend
  tests/        # node:test cho luật cơ bản
 ```

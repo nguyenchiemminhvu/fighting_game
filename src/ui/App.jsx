@@ -25,8 +25,13 @@ function formatTime(seconds) {
 }
 
 function getRoomStatus(room) {
+  if (room.players >= 2) {
+    if (!room.canWatch || room.viewerCount >= (room.viewerCapacity ?? 10)) {
+      return { label: 'Không nhận thêm người', className: 'busy', disabled: true };
+    }
+    return { label: room.phase === 'end' ? 'Trận đấu đã kết thúc' : 'Đang giao đấu · có thể xem', className: 'watching', disabled: false, action: 'watch' };
+  }
   if (room.phase === 'end') return { label: 'Đang kết thúc', className: 'busy', disabled: true };
-  if (room.players >= 2) return { label: 'Đang giao đấu', className: 'busy', disabled: true };
   if (room.players === 1) return { label: 'Đang chờ đối thủ', className: 'waiting', disabled: false };
   return { label: 'Còn trống', className: 'open', disabled: false };
 }
@@ -40,6 +45,8 @@ export function App() {
   const [error, setError] = useState('');
   const [connection, setConnection] = useState('Đang kết nối võ đài');
   const [roomKey, setRoomKey] = useState('room-1');
+  const [isSpectator, setIsSpectator] = useState(false);
+  const [spectatorCamera, setSpectatorCamera] = useState({ index: 0, label: 'Chính diện Bắc' });
   const [gameState, setGameState] = useState(START_ROOM_STATE);
   const [matchResult, setMatchResult] = useState(null);
   const canvasRef = useRef(null);
@@ -80,13 +87,17 @@ export function App() {
     }
     setMatchResult(null);
     setGameState(START_ROOM_STATE);
+    setIsSpectator(false);
+    setSpectatorCamera({ index: 0, label: 'Chính diện Bắc' });
     setScreen('lobby');
     setJoining('');
     setError('');
   }, []);
 
   const joinRoom = useCallback(async (room) => {
-    if (!room?.roomId || room.players >= 2 || joining) return;
+    const canJoinPlayer = room?.players < 2 && room?.phase !== 'end';
+    const canJoinAsViewer = room?.players === 2 && room?.canWatch && room.viewerCount < (room.viewerCapacity ?? 10);
+    if (!room?.roomId || (!canJoinPlayer && !canJoinAsViewer) || joining) return;
     setJoining(room.key);
     setError('');
     setRoomKey(room.key);
@@ -94,11 +105,27 @@ export function App() {
       const client = new Client(SERVER_URL);
       const joinedRoom = await client.joinById(room.roomId, { name: name.trim().slice(0, 20) || makeName() });
       roomRef.current = joinedRoom;
-      setConnection('Đã kết nối võ đài');
+      // Ask after subscribing so role detection does not depend on when the
+      // initial Colyseus state snapshot reaches this client.
+      const assignedRole = await new Promise((resolve) => {
+        const roleTimeout = window.setTimeout(() => resolve(null), 1800);
+        joinedRoom.onMessage('room-role', (payload) => {
+          window.clearTimeout(roleTimeout);
+          resolve(payload?.role ?? null);
+        });
+        joinedRoom.send('request-role');
+      });
+      const hasFighterSeat = joinedRoom.state?.players?.has?.(joinedRoom.sessionId);
+      const spectator = assignedRole === 'spectator'
+        || (assignedRole !== 'player' && (hasFighterSeat === false || (hasFighterSeat == null && room.players >= 2)));
+      setIsSpectator(spectator);
+      setSpectatorCamera({ index: 0, label: 'Chính diện Bắc' });
+      setConnection(spectator ? 'Đã vào chế độ người xem' : 'Đã kết nối võ đài');
       setScreen('fight');
     } catch (joinError) {
       setError(joinError?.message?.includes('seat') || joinError?.message?.includes('full')
-        ? 'Phòng vừa đủ hai người. Hãy chọn một phòng khác.'
+        || joinError?.message?.includes('người xem')
+        ? 'Phòng vừa đủ người. Hãy chọn một phòng khác.'
         : 'Không vào được phòng. Kết nối có thể đã gián đoạn, vui lòng thử lại.');
       setJoining('');
       fetchRooms();
@@ -112,10 +139,21 @@ export function App() {
     setConnection('Đang dựng đấu trường 3D…');
     setGameState({ ...START_ROOM_STATE, localId: room.sessionId });
     mountArena(canvasRef.current, room, roomKey, {
+      spectator: isSpectator,
+      onCameraChange: setSpectatorCamera,
       onState: (nextState) => {
         if (!cancelled) {
           setGameState(nextState);
-          if (nextState.phase === 'fight') setConnection('Đang giao đấu · mạng trực tuyến');
+          if (isSpectator && nextState.phase === 'end') {
+            setMatchResult((current) => current ?? {
+              winnerSessionId: nextState.winnerSessionId ?? '',
+              reason: nextState.resultReason ?? 'time',
+              scores: (nextState.players ?? []).map((player) => ({ id: player.id, name: player.name, score: player.score })),
+            });
+          }
+          if (isSpectator) {
+            setConnection(nextState.phase === 'end' ? 'Đang xem kết quả trận đấu' : 'Đang xem trực tiếp · mạng trực tuyến');
+          } else if (nextState.phase === 'fight') setConnection('Đang giao đấu · mạng trực tuyến');
           else if (nextState.phase === 'select') setConnection('Đang chuẩn bị chọn chưởng');
           else setConnection('Đang chờ đối thủ');
         }
@@ -123,9 +161,11 @@ export function App() {
       onMessage: (type, payload) => {
         if (type === 'match-end') {
           setMatchResult(payload);
-          setConnection('Trận đấu kết thúc');
-          if (returnTimerRef.current) window.clearTimeout(returnTimerRef.current);
-          returnTimerRef.current = window.setTimeout(() => returnToLobby(true), 6500);
+          setConnection(isSpectator ? 'Đang xem kết quả trận đấu' : 'Trận đấu kết thúc');
+          if (!isSpectator) {
+            if (returnTimerRef.current) window.clearTimeout(returnTimerRef.current);
+            returnTimerRef.current = window.setTimeout(() => returnToLobby(true), 6500);
+          }
         }
       },
     }).then((arena) => {
@@ -134,6 +174,9 @@ export function App() {
     }).catch((mountError) => {
       console.error(mountError);
       setError('Không khởi tạo được WebGL. Hãy dùng trình duyệt hỗ trợ WebGL 2 và cập nhật driver đồ họa.');
+    });
+    room.onMessage('spectator-eject', () => {
+      if (!cancelled && isSpectator) returnToLobby(true);
     });
     room.onError(() => setConnection('Mất kết nối với máy chủ'));
     room.onLeave(() => {
@@ -148,7 +191,7 @@ export function App() {
       arenaRef.current?.dispose();
       arenaRef.current = null;
     };
-  }, [screen, roomKey, returnToLobby]);
+  }, [screen, roomKey, isSpectator, returnToLobby]);
 
   const localPlayer = useMemo(() => gameState.players?.find((p) => p.id === gameState.localId), [gameState]);
   const opponent = useMemo(() => gameState.players?.find((p) => p.id !== gameState.localId), [gameState]);
@@ -163,28 +206,53 @@ export function App() {
       <main className="fight-screen">
         <canvas ref={canvasRef} className="game-canvas" aria-label="Đấu trường Giang Hồ Tỉ Thí" />
         <div className="game-vignette" />
-        <header className="fight-topbar">
-          <div className="fighter-score">
-            <span className="fighter-caption">BẠN</span>
-            <strong>{localPlayer?.name ?? name}</strong>
-            <span className="score-number">{localPlayer?.score ?? 0}<small> điểm</small></span>
-            <span className="score-status">{localPlayer?.slowT > 0 ? 'Hàn khí' : localPlayer?.burnT > 0 ? 'Thiêu đốt' : 'Võ sinh'}</span>
-          </div>
-          <div className="match-clock">
-            <span>{gameState.phase === 'select' ? 'CHUẨN BỊ' : gameState.phase === 'waiting' ? 'ĐỢI ĐỐI THỦ' : 'THỜI GIAN CÒN LẠI'}</span>
-            <strong>{gameState.phase === 'select' ? `00:${String(gameState.prepLeft ?? 10).padStart(2, '0')}` : formatTime(gameState.timeLeft)}</strong>
-            <small>{connection}</small>
-          </div>
-          <div className="fighter-score opponent-score">
-            <span className="fighter-caption">ĐỐI THỦ</span>
-            <strong>{opponent?.name ?? 'Đang chờ người chơi'}</strong>
-            <span className="score-number">{opponent?.score ?? 0}<small> điểm</small></span>
-            <span className="score-status">{opponent?.slowT > 0 ? 'Hàn khí' : opponent?.burnT > 0 ? 'Thiêu đốt' : opponent ? 'Đối thủ' : 'Chưa ghép cặp'}</span>
-          </div>
-          <button className="leave-button" onClick={leaveMatch}>Rời sàn</button>
-        </header>
+        {isSpectator ? (
+          <header className="fight-topbar spectator-topbar">
+            <div className="fighter-score">
+              <span className="fighter-caption">CHẾ ĐỘ NGƯỜI XEM</span>
+              <strong>{ROOMS.find((room) => room.key === roomKey)?.name ?? 'Đấu trường'}</strong>
+              <span className="score-status">{gameState.spectatorCount ?? 0}/10 người xem</span>
+            </div>
+            <div className="match-clock">
+              <span>{gameState.phase === 'select' ? 'CHUẨN BỊ GIAO ĐẤU' : gameState.phase === 'end' ? 'KẾT QUẢ TRẬN' : 'THỜI GIAN CÒN LẠI'}</span>
+              <strong>{gameState.phase === 'select' ? `00:${String(gameState.prepLeft ?? 10).padStart(2, '0')}` : formatTime(gameState.timeLeft)}</strong>
+              <small>{connection}</small>
+            </div>
+            <div className="spectator-scoreboard">
+              {(gameState.players ?? []).map((player, index) => (
+                <div className="spectator-score" key={player.id}>
+                  <span>{index === 0 ? 'VÕ SINH 1' : 'VÕ SINH 2'}</span>
+                  <strong>{player.name}</strong>
+                  <b>{player.score}<small> điểm</small></b>
+                </div>
+              ))}
+            </div>
+            <button className="leave-button" onClick={leaveMatch}>Rời chế độ xem</button>
+          </header>
+        ) : (
+          <header className="fight-topbar">
+            <div className="fighter-score">
+              <span className="fighter-caption">BẠN</span>
+              <strong>{localPlayer?.name ?? name}</strong>
+              <span className="score-number">{localPlayer?.score ?? 0}<small> điểm</small></span>
+              <span className="score-status">{localPlayer?.slowT > 0 ? 'Hàn khí' : localPlayer?.burnT > 0 ? 'Thiêu đốt' : 'Võ sinh'}</span>
+            </div>
+            <div className="match-clock">
+              <span>{gameState.phase === 'select' ? 'CHUẨN BỊ' : gameState.phase === 'waiting' ? 'ĐỢI ĐỐI THỦ' : 'THỜI GIAN CÒN LẠI'}</span>
+              <strong>{gameState.phase === 'select' ? `00:${String(gameState.prepLeft ?? 10).padStart(2, '0')}` : formatTime(gameState.timeLeft)}</strong>
+              <small>{connection}</small>
+            </div>
+            <div className="fighter-score opponent-score">
+              <span className="fighter-caption">ĐỐI THỦ</span>
+              <strong>{opponent?.name ?? 'Đang chờ người chơi'}</strong>
+              <span className="score-number">{opponent?.score ?? 0}<small> điểm</small></span>
+              <span className="score-status">{opponent?.slowT > 0 ? 'Hàn khí' : opponent?.burnT > 0 ? 'Thiêu đốt' : opponent ? 'Đối thủ' : 'Chưa ghép cặp'}</span>
+            </div>
+            <button className="leave-button" onClick={leaveMatch}>Rời sàn</button>
+          </header>
+        )}
 
-        {gameState.phase === 'waiting' && !matchResult && (
+        {!isSpectator && gameState.phase === 'waiting' && !matchResult && (
           <section className="waiting-overlay glass-panel">
             <span className="eyebrow">{ROOMS.find((r) => r.key === roomKey)?.name ?? 'Đấu trường'}</span>
             <h2>Đang chờ đối thủ</h2>
@@ -194,7 +262,7 @@ export function App() {
           </section>
         )}
 
-        {gameState.phase === 'select' && !matchResult && !localPlayer?.ready && (
+        {!isSpectator && gameState.phase === 'select' && !matchResult && !localPlayer?.ready && (
           <section className="prep-panel glass-panel">
             <div className="prep-heading">
               <div>
@@ -223,7 +291,7 @@ export function App() {
           </section>
         )}
 
-        {gameState.phase === 'select' && !matchResult && localPlayer?.ready && (
+        {!isSpectator && gameState.phase === 'select' && !matchResult && localPlayer?.ready && (
           <section className="waiting-overlay glass-panel">
             <span className="eyebrow">ĐÃ CHỌN TUYỆT KỸ</span>
             <h2>{PALMS[localPlayer.selectedPalm]?.name ?? 'Chưởng pháp'}</h2>
@@ -232,7 +300,7 @@ export function App() {
           </section>
         )}
 
-        {gameState.phase === 'fight' && !matchResult && (
+        {!isSpectator && gameState.phase === 'fight' && !matchResult && (
           <>
             <div className="combat-hints glass-panel">
               <span><kbd>W A S D</kbd> Di chuyển</span>
@@ -251,18 +319,31 @@ export function App() {
           </>
         )}
 
+        {isSpectator && (
+          <section className="spectator-controls glass-panel">
+            <div>
+              <span className="status-label">GÓC QUAN SÁT {spectatorCamera.index + 1}/4</span>
+              <strong>{spectatorCamera.label}</strong>
+              <small>{gameState.phase === 'select' ? 'Hai võ sinh đang chuẩn bị' : gameState.phase === 'end' ? 'Đang chờ võ sinh rời sàn' : 'Đang truyền hình trực tiếp'}</small>
+            </div>
+            <button className="spectator-camera-button" onClick={() => arenaRef.current?.nextSpectatorCamera()}>
+              Góc máy kế tiếp <kbd>V</kbd>
+            </button>
+          </section>
+        )}
+
         {matchResult && (
           <section className="result-panel glass-panel">
             <span className="eyebrow">TRẬN ĐẤU ĐÃ KẾT THÚC</span>
-            <h2>{matchResult.winnerSessionId === gameState.localId ? 'ĐẠI HIỆP ĐẠI THẮNG' : matchResult.winnerSessionId ? 'THẤT BẠI' : 'BẤT PHÂN THẮNG BẠI'}</h2>
-            <p>{matchResult.reason === 'forfeit' ? 'Đối thủ đã rời trận.' : 'Đã hết 5 phút giao đấu.'}</p>
+            <h2>{isSpectator ? 'TRẬN ĐẤU ĐÃ HẠ MÀN' : matchResult.winnerSessionId === gameState.localId ? 'ĐẠI HIỆP ĐẠI THẮNG' : matchResult.winnerSessionId ? 'THẤT BẠI' : 'BẤT PHÂN THẮNG BẠI'}</h2>
+            <p>{isSpectator ? 'Bạn sẽ được đưa về hàng chờ khi hai võ sinh rời sàn đấu.' : matchResult.reason === 'forfeit' ? 'Đối thủ đã rời trận.' : 'Đã hết 5 phút giao đấu.'}</p>
             <div className="result-scores">
               {(matchResult.scores ?? []).map((score) => (
                 <div key={score.id}><span>{score.name}</span><strong>{score.score}</strong></div>
               ))}
             </div>
-            <span className="return-countdown">Tự động về hàng chờ sau vài giây…</span>
-            <button className="primary-button" onClick={leaveMatch}>Về hàng chờ ngay</button>
+            {!isSpectator && <span className="return-countdown">Tự động về hàng chờ sau vài giây…</span>}
+            <button className="primary-button" onClick={leaveMatch}>{isSpectator ? 'Rời chế độ xem' : 'Về hàng chờ ngay'}</button>
           </section>
         )}
 
@@ -300,7 +381,7 @@ export function App() {
         <section className="lobby-content">
           <div className="section-heading">
             <div><span className="eyebrow">CHỌN ĐẤU TRƯỜNG</span><h2>Hàng chờ võ đài</h2></div>
-            <div className="room-count">{rooms.filter((r) => r.players < 2).length || 0}<small> / 6 sàn còn chỗ</small></div>
+            <div className="room-count">{rooms.filter((r) => r.players < 2 || r.canWatch).length || 0}<small> / 6 sàn còn chỗ</small></div>
           </div>
           {error && <div className="error-banner">{error}</div>}
           <div className="room-grid">
@@ -312,9 +393,9 @@ export function App() {
                   <div className="room-info">
                     <div><h3>{room.name}</h3><p>{room.subtitle}</p></div>
                     <div className={`room-state ${status.className}`}><i />{status.label}</div>
-                    <div className="room-footer"><span className="room-slots">{room.players}/2 <small>võ sinh</small></span>
+                    <div className="room-footer"><span className="room-slots">{room.players}/2 <small>võ sinh</small><small className="viewer-slots"> · {room.viewerCount ?? 0}/10 người xem</small></span>
                       <button className={status.disabled || !room.roomId ? 'secondary-button' : 'room-enter'} disabled={status.disabled || !room.roomId || joining !== ''} onClick={() => joinRoom(room)}>
-                        {joining === room.key ? 'Đang vào…' : room.phase === 'end' ? 'Đang kết thúc' : status.disabled ? 'Đã đủ chỗ' : room.players === 1 ? 'Vào ghép cặp' : 'Vào sàn'}
+                        {joining === room.key ? 'Đang vào…' : status.disabled ? 'Đã đủ chỗ' : status.action === 'watch' ? 'Vào xem trận' : room.players === 1 ? 'Vào ghép cặp' : 'Vào sàn'}
                         {!status.disabled && <span>↗</span>}
                       </button>
                     </div>

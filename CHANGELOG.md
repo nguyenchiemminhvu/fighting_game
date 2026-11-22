@@ -1,5 +1,14 @@
 # Changelog
 
+## Chế độ người xem
+
+- Mở rộng mỗi `FightRoom` từ 2 lên tối đa 12 kết nối, vẫn chỉ cấp hai suất võ sinh; mười kết nối bổ sung được theo dõi trong map riêng.
+- Bổ sung số người xem và trạng thái có thể xem vào API hàng chờ; người xem không được thêm vào `state.players` hoặc `runtime`.
+- Thêm nhánh render người xem trong Babylon.js với bốn camera cố định Bắc / Đông / Nam / Tây ở góc nâng 45°. Nút HUD và phím `V` chuyển góc camera.
+- Chỉ người chơi khởi tạo Havok và đăng ký input chiến đấu; người xem chỉ nhận state, animation và hiệu ứng trận.
+- Khi võ sinh cuối cùng rời phòng sau trận đấu, server phát sự kiện đưa toàn bộ người xem về hàng chờ. Thêm unit test cho giới hạn người xem và góc camera.
+
+
 ## v4 – Quán tính khi nhảy, netcode dự đoán, cân bằng chưởng pháp
 
 Điều khiển:

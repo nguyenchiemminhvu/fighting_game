@@ -9,6 +9,7 @@ import { HavokPlugin } from '@babylonjs/core/Physics/v2/Plugins/havokPlugin';
 import { PhysicsAggregate } from '@babylonjs/core/Physics/v2/physicsAggregate';
 import { PhysicsShapeType } from '@babylonjs/core/Physics/v2/IPhysicsEnginePlugin';
 import { ARENA_PROPS, PALMS } from './rules.js';
+import { SPECTATOR_CAMERAS, getSpectatorCameraPose } from './spectatorCameras.js';
 import {
   DASH_KEYS, RUN_SPEED, TICK_DT,
   chargeProgress, encodeCmd, stepFighter, unpackFighter,
@@ -233,6 +234,7 @@ function buildArena(scene, roomKey, shadowGenerator) {
 }
 
 export async function mountArena(canvas, room, roomKey, callbacks = {}) {
+  const spectatorMode = callbacks.spectator === true;
   const engine = new Engine(canvas, true, { antialias: true, stencil: true, adaptToDeviceRatio: true, preserveDrawingBuffer: false });
   const scene = new Scene(engine);
   scene.clearColor = new Color3(0.055, 0.052, 0.048).toColor4(1);
@@ -251,16 +253,18 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
 
   // Havok is bundled with the project. Unsupported devices still get the full
   // WebGL scene and authoritative server movement if WASM initialization fails.
-  try {
-    const havok = await HavokPhysics();
-    scene.enablePhysics(new Vector3(0, -9.81, 0), new HavokPlugin(true, havok));
-  } catch (error) {
-    console.warn('Havok initialization skipped; server movement/collision remains active.', error);
+  if (!spectatorMode) {
+    try {
+      const havok = await HavokPhysics();
+      scene.enablePhysics(new Vector3(0, -9.81, 0), new HavokPlugin(true, havok));
+    } catch (error) {
+      console.warn('Havok initialization skipped; server movement/collision remains active.', error);
+    }
   }
 
   const arena = buildArena(scene, roomKey, shadows);
-  const camera = new FreeCamera('third-person-camera', new Vector3(0, 5, 10), scene);
-  camera.minZ = 0.1; camera.maxZ = 250; camera.fov = 0.86; camera.inertia = 0;
+  const camera = new FreeCamera(spectatorMode ? 'spectator-camera' : 'third-person-camera', new Vector3(0, 5, 10), scene);
+  camera.minZ = 0.1; camera.maxZ = 250; camera.fov = spectatorMode ? 1.06 : 0.86; camera.inertia = 0;
   scene.activeCamera = camera;
 
   const palettes = [
@@ -276,6 +280,7 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
   let pitch = 0.02;
   let dragging = false;
   let pointerLocked = false;
+  let spectatorCameraIndex = 0;
   let lastMouse = { x: 0, y: 0 };
   let lastFrameAt = performance.now();
   let lastHudSend = 0;
@@ -293,6 +298,22 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
   let lastSnapshotClock = -1;
   const before = { x: 0, y: 0, z: 0 };
   const after = { x: 0, y: 0, z: 0 };
+  const spectatorTarget = new Vector3(0, 0, 0);
+
+  function setSpectatorCamera(index) {
+    spectatorCameraIndex = ((index % SPECTATOR_CAMERAS.length) + SPECTATOR_CAMERAS.length) % SPECTATOR_CAMERAS.length;
+    const pose = getSpectatorCameraPose(spectatorCameraIndex);
+    camera.position.set(pose.x, pose.y, pose.z);
+    camera.setTarget(spectatorTarget);
+    callbacks.onCameraChange?.({ index: spectatorCameraIndex, label: pose.label });
+    return spectatorCameraIndex;
+  }
+
+  function nextSpectatorCamera() {
+    return setSpectatorCamera(spectatorCameraIndex + 1);
+  }
+
+  if (spectatorMode) setSpectatorCamera(0);
 
   function ensureFighter(id, player, index) {
     if (fighters.has(id)) return fighters.get(id);
@@ -523,6 +544,7 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
   room.onMessage('charge-cancel', (data) => callbacks.onMessage?.('charge-cancel', data));
   room.onMessage('match-end', (data) => callbacks.onMessage?.('match-end', data));
   room.onStateChange((newState) => { state = newState; recordSnapshots(); });
+  if (spectatorMode) room.send('spectator-snapshot-request');
 
   function readCmd() {
     let forward = 0; let right = 0;
@@ -616,6 +638,15 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
 
   function onKeyDown(event) {
     if (disposed) return;
+    if (spectatorMode) {
+      if (event.code === 'KeyV' && !event.repeat) {
+        event.preventDefault();
+        nextSpectatorCamera();
+      } else if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyC'].includes(event.code)) {
+        event.preventDefault();
+      }
+      return;
+    }
     const cameraKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
     if (event.code === 'Space' || cameraKeys.includes(event.code)) event.preventDefault();
     if (cameraKeys.includes(event.code)) {
@@ -665,13 +696,15 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
   function onPointerLock() { pointerLocked = document.pointerLockElement === canvas; }
   function onContextMenu(event) { event.preventDefault(); }
   window.addEventListener('keydown', onKeyDown);
-  window.addEventListener('keyup', onKeyUp);
-  window.addEventListener('blur', onBlur);
-  window.addEventListener('pointermove', onPointerMove);
-  window.addEventListener('pointerup', onPointerUp);
-  document.addEventListener('pointerlockchange', onPointerLock);
-  canvas.addEventListener('pointerdown', onPointerDown);
-  canvas.addEventListener('contextmenu', onContextMenu);
+  if (!spectatorMode) {
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    document.addEventListener('pointerlockchange', onPointerLock);
+    canvas.addEventListener('pointerdown', onPointerDown);
+    canvas.addEventListener('contextmenu', onContextMenu);
+  }
 
   function updateModel(model, view, now, dt) {
     if (!model.placed) {
@@ -865,7 +898,7 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
     const now = performance.now();
     const delta = Math.min(MAX_FRAME_SECONDS, Math.max(0, (now - lastFrameAt) / 1000));
     lastFrameAt = now;
-    updateCameraKeys(delta);
+    if (!spectatorMode) updateCameraKeys(delta);
     const predicting = stepPrediction(delta);
     const players = state?.players;
     if (players) {
@@ -887,24 +920,26 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
       }
       // The camera rides the same smoothed position the local fighter is drawn
       // at, never the raw network state.
-      const anchor = fighters.get(localId)?.view;
-      if (anchor) {
-        const fwd = FORWARD(yaw);
-        const shoulderX = Math.cos(yaw);
-        const shoulderZ = -Math.sin(yaw);
-        camera.position.set(
-          anchor.x - fwd.x * 4.7 + shoulderX * 0.62,
-          anchor.y + 2.2,
-          anchor.z - fwd.z * 4.7 + shoulderZ * 0.62,
-        );
-        // Aim the camera over the near shoulder, not down the spell's barrel.
-        // Pitch affects only this view point; the server keeps combat aim separate.
-        lookTarget.set(
-          anchor.x + fwd.x * 5.4,
-          anchor.y + 1.55 + Math.tan(pitch) * 5.4,
-          anchor.z + fwd.z * 5.4,
-        );
-        camera.setTarget(lookTarget);
+      if (!spectatorMode) {
+        // The fighter camera rides the same smoothed position as the local rig.
+        const anchor = fighters.get(localId)?.view;
+        if (anchor) {
+          const fwd = FORWARD(yaw);
+          const shoulderX = Math.cos(yaw);
+          const shoulderZ = -Math.sin(yaw);
+          camera.position.set(
+            anchor.x - fwd.x * 4.7 + shoulderX * 0.62,
+            anchor.y + 2.2,
+            anchor.z - fwd.z * 4.7 + shoulderZ * 0.62,
+          );
+          // Camera pitch never changes authoritative attack direction.
+          lookTarget.set(
+            anchor.x + fwd.x * 5.4,
+            anchor.y + 1.55 + Math.tan(pitch) * 5.4,
+            anchor.z + fwd.z * 5.4,
+          );
+          camera.setTarget(lookTarget);
+        }
       }
       if (callbacks.onState && now - lastHudSend > 100) {
         lastHudSend = now;
@@ -927,6 +962,8 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
             };
           }),
           localId,
+          spectatorCount: Number(state.viewerCount) || 0,
+          spectatorMode,
         });
       }
     }
@@ -978,21 +1015,27 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
 
   return {
     scene,
-    setPalm(palm) { room.send('select-palm', { palm }); },
+    setPalm(palm) {
+      if (!spectatorMode) room.send('select-palm', { palm });
+    },
+    nextSpectatorCamera,
+    get spectatorCameraIndex() { return spectatorCameraIndex; },
     leave() { return room.leave(); },
     dispose() {
       if (disposed) return;
       disposed = true;
       window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('keyup', onKeyUp);
-      window.removeEventListener('blur', onBlur);
-      window.removeEventListener('pointermove', onPointerMove);
-      window.removeEventListener('pointerup', onPointerUp);
       window.removeEventListener('resize', resize);
-      document.removeEventListener('pointerlockchange', onPointerLock);
-      canvas.removeEventListener('pointerdown', onPointerDown);
-      canvas.removeEventListener('contextmenu', onContextMenu);
-      if (document.pointerLockElement === canvas) document.exitPointerLock?.();
+      if (!spectatorMode) {
+        window.removeEventListener('keyup', onKeyUp);
+        window.removeEventListener('blur', onBlur);
+        window.removeEventListener('pointermove', onPointerMove);
+        window.removeEventListener('pointerup', onPointerUp);
+        document.removeEventListener('pointerlockchange', onPointerLock);
+        canvas.removeEventListener('pointerdown', onPointerDown);
+        canvas.removeEventListener('contextmenu', onContextMenu);
+        if (document.pointerLockElement === canvas) document.exitPointerLock?.();
+      }
       for (const effect of fx.values()) { effect.root.dispose(false, false); effect.materials.forEach((material) => material.dispose()); }
       for (const ring of rings) { ring.mesh.dispose(); ring.material.dispose(); }
       engine.stopRenderLoop(render);
