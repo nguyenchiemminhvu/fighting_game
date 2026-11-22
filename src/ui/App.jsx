@@ -14,7 +14,7 @@ const START_ROOM_STATE = {
 };
 
 function makeName() {
-  return `Võ sinh ${Math.floor(10 + Math.random() * 90)}`;
+  return `Cao thủ ${Math.floor(10 + Math.random() * 90)}`;
 }
 
 
@@ -266,7 +266,7 @@ export function App() {
                   <div className={`hp-meter ${(localPlayer?.hp ?? 100) <= 30 ? 'critical' : ''}`}><i style={{ width: `${Math.max(0, Math.min(100, localPlayer?.hp ?? 100))}%` }} /></div>
                 </>
               )}
-              <span className="score-status">{localPlayer?.slowT > 0 ? 'Hàn khí' : localPlayer?.burnT > 0 ? 'Thiêu đốt' : 'Võ sinh'}</span>
+              <span className="score-status">{localPlayer?.slowT > 0 ? 'Hàn khí' : localPlayer?.burnT > 0 ? 'Thiêu đốt' : 'Cao thủ'}</span>
             </div>
             <div className="match-clock">
               <span>{gameState.phase === 'select' ? 'CHUẨN BỊ' : gameState.phase === 'waiting' ? 'ĐỢI ĐỐI THỦ' : gameState.phase === 'end' ? 'KẾT QUẢ' : 'GIAO ĐẤU KHÔNG GIỚI HẠN'}</span>
@@ -292,7 +292,7 @@ export function App() {
           <section className="waiting-overlay glass-panel">
             <span className="eyebrow">{ROOMS.find((r) => r.key === roomKey)?.name ?? 'Đấu trường'}</span>
             <h2>Đang chờ đối thủ</h2>
-            <p>Phòng chỉ dành cho hai võ sinh. Khi người thứ hai vào sàn, cả hai có 10 giây chọn chưởng pháp.</p>
+            <p>Phòng chỉ dành cho hai cao thủ. Khi người thứ hai vào sàn, cả hai có 10 giây chọn chưởng pháp.</p>
             <div className="waiting-pulse"><i /><i /><i /></div>
             <button className="secondary-button" onClick={leaveMatch}>Quay về hàng chờ</button>
           </section>
@@ -304,7 +304,7 @@ export function App() {
               <div>
                 <span className="eyebrow">10 GIÂY TRƯỚC KHI GIAO ĐẤU</span>
                 <h2>Chọn chưởng pháp</h2>
-                <p>Mỗi võ sinh chọn một tuyệt kỹ. Giữ <kbd>C</kbd> để vận khí và tự động phát chưởng khi đủ lực.</p>
+                <p>Mỗi cao thủ chọn một tuyệt kỹ. Giữ <kbd>C</kbd> để vận khí và tự động phát chưởng khi đủ lực.</p>
               </div>
               <div className="prep-countdown">{gameState.prepLeft ?? 10}<small>giây</small></div>
             </div>
@@ -331,7 +331,7 @@ export function App() {
           <section className="waiting-overlay glass-panel">
             <span className="eyebrow">ĐÃ CHỌN TUYỆT KỸ</span>
             <h2>{PALMS[localPlayer.selectedPalm]?.name ?? 'Chưởng pháp'}</h2>
-            <p>Chưởng pháp đã khóa. Đang chờ đối thủ chọn xong — trận đấu sẽ bắt đầu ngay khi cả hai võ sinh sẵn sàng.</p>
+            <p>Chưởng pháp đã khóa. Đang chờ đối thủ chọn xong — trận đấu sẽ bắt đầu ngay khi cả hai cao thủ sẵn sàng.</p>
             <div className="prep-countdown">{gameState.prepLeft ?? 10}<small>giây còn lại</small></div>
           </section>
         )}
@@ -360,7 +360,7 @@ export function App() {
             <div>
               <span className="status-label">GÓC QUAN SÁT {spectatorCamera.index + 1}/4</span>
               <strong>{spectatorCamera.label}</strong>
-              <small>{gameState.phase === 'select' ? 'Hai võ sinh đang chuẩn bị' : gameState.phase === 'end' ? 'Đang chờ võ sinh rời sàn' : 'Đang truyền hình trực tiếp'}</small>
+              <small>{gameState.phase === 'select' ? 'Hai cao thủ đang chuẩn bị' : gameState.phase === 'end' ? 'Đang chờ cao thủ rời sàn' : 'Đang truyền hình trực tiếp'}</small>
             </div>
             <button className="spectator-camera-button" onClick={() => arenaRef.current?.nextSpectatorCamera()}>
               Góc máy kế tiếp <kbd>V</kbd>
@@ -382,12 +382,12 @@ export function App() {
               ? 'Các hạ liên tục né tránh giao tranh. Thật hèn nhát!'
               : matchResult.reason === 'disengagement'
                 ? isSpectator
-                  ? 'Một võ sinh bị xử thua. Các hạ liên tục né tránh giao tranh. Thật hèn nhát!'
+                  ? 'Một cao thủ bị xử thua. Các hạ liên tục né tránh giao tranh. Thật hèn nhát!'
                   : matchResult.winnerSessionId === gameState.localId
                     ? 'Đối thủ bị xử thua vì liên tục né tránh giao tranh.'
                     : 'Các hạ liên tục né tránh giao tranh. Thật hèn nhát!'
                 : isSpectator
-                  ? 'Bạn sẽ được đưa về hàng chờ khi hai võ sinh rời sàn đấu.'
+                  ? 'Bạn sẽ được đưa về hàng chờ khi hai cao thủ rời sàn đấu.'
                   : matchResult.reason === 'forfeit' ? 'Đối thủ đã rời trận.' : 'HP của đối thủ đã giảm về 0.'}</p>
             {(matchResult.players ?? []).length > 0 && (
               <div className="result-players">
@@ -454,7 +454,7 @@ export function App() {
                   <div className="room-info">
                     <div><h3>{room.name}</h3><p>{room.subtitle}</p></div>
                     <div className={`room-state ${status.className}`}><i />{status.label}</div>
-                    <div className="room-footer"><span className="room-slots">{room.players}/2 <small>võ sinh</small><small className="viewer-slots"> · {room.viewerCount ?? 0}/10 người xem</small></span>
+                    <div className="room-footer"><span className="room-slots">{room.players}/2 <small>cao thủ</small><small className="viewer-slots"> · {room.viewerCount ?? 0}/10 người xem</small></span>
                       <button className={status.disabled || !room.roomId ? 'secondary-button' : 'room-enter'} disabled={status.disabled || !room.roomId || joining !== ''} onClick={() => joinRoom(room)}>
                         {joining === room.key ? 'Đang vào…' : status.disabled ? 'Đã đủ chỗ' : status.action === 'watch' ? 'Vào xem trận' : room.players === 1 ? 'Vào ghép cặp' : 'Vào sàn'}
                         {!status.disabled && <span>↗</span>}

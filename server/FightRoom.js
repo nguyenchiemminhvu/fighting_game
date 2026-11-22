@@ -48,7 +48,7 @@ const DISENGAGEMENT_MESSAGE = 'Các hạ liên tục né tránh giao tranh. Th�
 class PlayerState extends Schema {
   constructor() {
     super();
-    this.name = 'Võ sinh';
+    this.name = 'Cao thủ';
     this.x = 0; this.y = 0; this.z = 0;
     this.yaw = 0; this.pitch = 0;
     this.hp = MAX_HP;
@@ -95,7 +95,7 @@ defineTypes(FightState, {
 
 function safeName(value) {
   const name = String(value ?? '').replace(/[<>\u0000-\u001f]/g, '').trim().slice(0, 20);
-  return name || `Võ sinh ${Math.floor(10 + Math.random() * 90)}`;
+  return name || `Cao thủ ${Math.floor(10 + Math.random() * 90)}`;
 }
 
 function forwardVector(yaw, pitch = 0) {

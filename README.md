@@ -57,29 +57,29 @@ Khi bật nhảy, nhân vật mang theo vận tốc chạy lúc rời đất (đ
 
 ## Số người đang ở sảnh
 
-- Trang chủ gửi heartbeat 5 giây một lần khi đang ở màn hình sảnh; khi vào đấu trường (dù là võ sinh hay người xem), client đánh dấu session không còn ở sảnh.
+- Trang chủ gửi heartbeat 5 giây một lần khi đang ở màn hình sảnh; khi vào đấu trường (dù là cao thủ hay người xem), client đánh dấu session không còn ở sảnh.
 - `GET /api/rooms` trả thêm trường `onlineCount`; số này chỉ đếm session đang active ở sảnh, không cộng người trong đấu trường.
 - Server tự hết hạn session nếu không nhận heartbeat trong 15 giây, tránh giữ số online cũ khi tab hoặc trình duyệt bị đóng đột ngột.
 - Việc đếm dùng session ẩn danh theo tab, không yêu cầu tài khoản và không lưu tiến trình game.
 
 ## Chế độ người xem
 
-- Mỗi võ đài có tối đa 2 võ sinh và 10 người xem. Người vào khi hai võ sinh đã chiếm chỗ sẽ nhận vai trò người xem; khi phòng còn một chỗ võ sinh thì người vào vẫn là võ sinh thứ hai.
+- Mỗi võ đài có tối đa 2 cao thủ và 10 người xem. Người vào khi hai cao thủ đã chiếm chỗ sẽ nhận vai trò người xem; khi phòng còn một chỗ cao thủ thì người vào vẫn là cao thủ thứ hai.
 - Người xem nhận state và hiệu ứng trận đấu để render, nhưng không được nhận input điều khiển, chọn chưởng pháp hoặc gửi lệnh chiến đấu.
 - Có 4 camera cố định quanh võ đài (Bắc, Đông, Nam, Tây). Mỗi camera đặt ở góc nâng 45° so với mặt sàn và nhìn về tâm võ đài. Nhấn `V` hoặc dùng nút **Góc máy kế tiếp** để chuyển camera.
-- Khi cả hai võ sinh rời phòng sau khi trận kết thúc, server phát sự kiện đưa toàn bộ người xem trở lại hàng chờ.
+- Khi cả hai cao thủ rời phòng sau khi trận kết thúc, server phát sự kiện đưa toàn bộ người xem trở lại hàng chờ.
 
 ## 4. Luật và nội dung đã có
 
 - Sảnh hiển thị sáu phòng cố định với trạng thái trống / đang chờ / giao đấu / hết chỗ xem.
-- Mỗi phòng có tối đa 12 client: hai võ sinh và mười người xem; client chỉ được join phòng có sẵn.
+- Mỗi phòng có tối đa 12 client: hai cao thủ và mười người xem; client chỉ được join phòng có sẵn.
 - Khi người thứ hai vào phòng, cả hai có tối đa 10 giây chọn một chưởng pháp; nếu cả hai chọn xong sớm, trận đấu bắt đầu ngay.
-- Mỗi võ sinh bắt đầu với 100 HP. Sát thương từ quyền pháp / chưởng pháp trừ trực tiếp HP; ai về 0 HP trước thì thua. Trận đấu không có bộ đếm thời gian.
+- Mỗi cao thủ bắt đầu với 100 HP. Sát thương từ quyền pháp / chưởng pháp trừ trực tiếp HP; ai về 0 HP trước thì thua. Trận đấu không có bộ đếm thời gian.
 - Người còn lại thắng nếu đối thủ rời trận giữa chừng.
 - Tốc độ lùi bằng S bằng 85% tốc độ tiến bằng W (4,76 so với 5,6 đơn vị/giây); tốc độ ngang không đổi khi chỉ dùng A / D.
 - Luật chống né giao tranh được server kiểm tra ở 60 tick/giây: nếu liên tục không nhìn về phía đối thủ trong 30 giây thì bị xử thua. Đối thủ được xem là trong tầm nhìn khi nằm trong nón ngang ±45°, hoặc ở cách không quá tầm Đại Lực Kim Cang Chưởng (8 đơn vị). Chuyển lại hướng nhìn hoặc áp sát vào trong tầm này sẽ reset bộ đếm. Nếu cả hai cùng chạm ngưỡng trong một tick, cả hai cùng bị xử thua với thông báo “Các hạ liên tục né tránh giao tranh. Thật hèn nhát!”.
 - Bảng kết quả chỉ hiển thị tên và trạng thái thắng / thua, không hiển thị HP còn lại.
-- Võ sinh tự chuyển về sảnh sau khi trận kết thúc; người xem được server đưa về hàng chờ sau khi cả hai võ sinh rời sàn.
+- Cao thủ tự chuyển về sảnh sau khi trận kết thúc; người xem được server đưa về hàng chờ sau khi cả hai cao thủ rời sàn.
 - Quyền pháp chung có chuỗi tối đa ba hit, xen kẽ hoạt ảnh đấm / đá; mỗi hit có khoảng giãn để đối thủ phục hồi.
 - Chưởng pháp: Nhất Dương Chỉ, Giáng Long Chưởng, Hàn Băng Chưởng, Hoả Diệm Đao, Đại Lực Kim Cang Chưởng và Tiểu Vô Tướng Công. Hiệu ứng đạn có tạo hình riêng: tia laser, rồng khí uốn lượn, cụm tinh thể băng, lưỡi hỏa diệm và ấn bàn tay kim cang.
 
@@ -93,7 +93,7 @@ Khi bật nhảy, nhân vật mang theo vận tốc chạy lúc rời đất (đ
 
 - Đại Lực Kim Cang Chưởng là một bàn tay khổng lồ (bán kính 3,6 quanh đường bay): không né ngang hay nhảy qua được, chỉ có thể lùi ra khỏi tầm. Vùng trúng là một mặt phẳng dày theo hướng bay nên không đánh trúng người đứng sau lưng; chỉ phần lõi nhỏ của chưởng bị địa hình triệt tiêu.
 - Đấu trường có giới hạn di chuyển, trụ, tường, đá và bục; các vật cản đứng yên, collider được dùng chung dữ liệu kích thước / hình dạng với mesh render. Có thể nhảy lên đứng và di chuyển trên bục / đá / tường thấp; chưởng va vật cản tạo vụ nổ có bán kính bằng `0,14 × sát thương gốc` (đơn vị thế giới), gây đủ sát thương và hiệu ứng kỹ năng nhưng không đẩy lùi.
-- Phòng 6 có kiến trúc riêng: tường cổng kiểm soát, trụ đọc thẻ và thanh chắn, chốt bảo vệ, hành lang chữ T hẹp với dãy cửa thang máy ở hai bên, tường biên và tường hồi khép kín hai khoang phụ, sau đó mở ra sảnh giao nhau rộng. Băng ghế thấp ở sảnh có thể nhảy lên và đứng; tường, kính, thanh chắn, thang máy và chưởng pháp dùng chung dữ liệu vật cản. Hai võ sinh xuất hiện ở phần sảnh rộng; bốn camera người xem hướng vào khu vực này.
+- Phòng 6 có kiến trúc riêng: tường cổng kiểm soát, trụ đọc thẻ và thanh chắn, chốt bảo vệ, hành lang chữ T hẹp với dãy cửa thang máy ở hai bên, tường biên và tường hồi khép kín hai khoang phụ, sau đó mở ra sảnh giao nhau rộng. Băng ghế thấp ở sảnh có thể nhảy lên và đứng; tường, kính, thanh chắn, thang máy và chưởng pháp dùng chung dữ liệu vật cản. Hai cao thủ xuất hiện ở phần sảnh rộng; bốn camera người xem hướng vào khu vực này.
 
 ## 5. Kiến trúc
 
@@ -112,7 +112,7 @@ Server quyết định trạng thái phòng, HP, vị trí, vận khí, hồi ch
 
 ### Đồng bộ chuyển động
 
-Chuyển động của võ sinh được mô phỏng bởi một module xác định dùng chung cho cả hai phía (`src/game/fighter.js`), chạy theo tick cố định 60 Hz:
+Chuyển động của cao thủ được mô phỏng bởi một module xác định dùng chung cho cả hai phía (`src/game/fighter.js`), chạy theo tick cố định 60 Hz:
 
 - **Lệnh điều khiển (`cmds`)**: mỗi tick client đóng gói một lệnh có số thứ tự (hướng WASD, góc nhìn, trạng thái giữ Q / C, nhảy, bộ pháp) và gửi cho server. Server xếp hàng và chạy lại đúng từng lệnh với cùng bước thời gian.
 - **Dự đoán phía client**: client áp dụng lệnh lên bản mô phỏng của chính mình ngay lập tức, nên nhân vật phản hồi tức thì, không chờ một vòng mạng.
@@ -169,7 +169,7 @@ src/
   game/       # Babylon.js scene, input, client rendering, luật dùng chung
               #   spectatorCameras.js – giới hạn người xem và 4 camera cố định
               #   rules.js   – hằng số phòng, chưởng pháp, cấu hình hình học từng map
-              #   fighter.js – mô phỏng võ sinh xác định, dùng chung client/server
+              #   fighter.js – mô phỏng cao thủ xác định, dùng chung client/server
               #   arena.js   – render, dự đoán phía client, nội suy
   ui/         # React lobby, prep screen, HUD và kết quả
   style.css   # giao diện
