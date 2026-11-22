@@ -1,6 +1,8 @@
 export const MAX_HP = 100;
 export const BLAST_RADIUS_PER_DAMAGE = 0.14;
 export const PREP_SECONDS = 10;
+export const DISENGAGEMENT_LIMIT_SECONDS = 30;
+export const DISENGAGEMENT_HALF_ANGLE_DEGREES = 45;
 export const ROOM_CAPACITY = 2;
 export const ROOMS = [
   { key: 'room-1', name: 'Sân đình', subtitle: 'Đèn lồng · nền đá', map: 'courtyard' },
@@ -93,6 +95,47 @@ export function applyHealthDamage(currentHp, damage) {
   const current = Math.max(0, Number(currentHp) || 0);
   const amount = Math.max(0, Number(damage) || 0);
   return Math.max(0, current - amount);
+}
+
+// A fighter is considered engaged when the opponent is in the forward 45-degree
+// horizontal cone, or close enough to be within Great Vajra Palm's nominal range.
+export function isEngagedWithOpponent(source, target) {
+  if (!source || !target) return false;
+  const dx = target.x - source.x;
+  const dz = target.z - source.z;
+  const dy = (target.y ?? 0) - (source.y ?? 0);
+  const distance3D = Math.hypot(dx, dy, dz);
+  if (distance3D <= PALMS.kim.range) return true;
+
+  const horizontalDistance = Math.hypot(dx, dz);
+  if (horizontalDistance <= 1e-9 || !Number.isFinite(source.yaw)) return false;
+
+  const forwardX = -Math.sin(source.yaw);
+  const forwardZ = -Math.cos(source.yaw);
+  const facingDot = (dx * forwardX + dz * forwardZ) / horizontalDistance;
+  const minDot = Math.cos((DISENGAGEMENT_HALF_ANGLE_DEGREES * Math.PI) / 180);
+  return facingDot >= minDot - 1e-9;
+}
+
+export function advanceDisengagementTicks(currentTicks, engaged, limitTicks) {
+  if (engaged) return 0;
+  const current = Math.max(0, Math.trunc(Number(currentTicks) || 0));
+  const limit = Math.max(1, Math.trunc(Number(limitTicks) || 1));
+  return Math.min(limit, current + 1);
+}
+
+export function resolveDisengagementOutcome(playerIds, disengagedIds) {
+  const players = [...new Set(playerIds)];
+  const losers = [...new Set(disengagedIds)].filter((id) => players.includes(id));
+  if (players.length !== 2 || losers.length === 0) return null;
+  if (losers.length === 2) {
+    return { winnerSessionId: '', reason: 'mutual_disengagement', loserSessionIds: losers };
+  }
+  return {
+    winnerSessionId: players.find((id) => id !== losers[0]) ?? '',
+    reason: 'disengagement',
+    loserSessionIds: losers,
+  };
 }
 
 // Collision footprints are shared by server movement and projectile tests.

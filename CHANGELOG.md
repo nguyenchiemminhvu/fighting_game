@@ -65,3 +65,12 @@ Giao thức mạng thay đổi: các message `input`, `q-held`, `charge-start`, 
 - Added a smooth visual one-turn body/arm sweep and qi-gathering phase for Giáng Long; the body turn does not rotate the camera.
 - Replaced generic projectile primitives with distinct procedural visuals: laser ray, animated flying dragon, ice crystal cluster, fire blade and golden palm seal.
 - Added tests for forward-cone acquisition and elevated targets.
+
+
+## Luật chống né giao tranh và điều chỉnh tốc độ lùi
+
+- Tốc độ lùi (S) giảm còn 85% tốc độ tiến (W): 4,76 so với 5,6 đơn vị/giây; mô phỏng dùng chung client / server nên vẫn giữ đối chiếu dự đoán nhất quán.
+- Server theo dõi liên tục thời gian mỗi võ sinh không hướng về phía đối thủ, theo tick cố định 60 Hz. Bộ đếm được reset khi đối thủ trở lại nón nhìn ngang ±45° hoặc đi vào tầm 8 đơn vị của Đại Lực Kim Cang Chưởng.
+- Một võ sinh không tìm kiếm giao tranh đủ 30 giây sẽ bị xử thua; nếu cả hai cùng chạm ngưỡng trong cùng tick thì cả hai cùng bị xử thua, không có người chiến thắng. Thông báo xử thua: “Các hạ liên tục né tránh giao tranh. Thật hèn nhát!”.
+- Bảng kết quả chỉ còn tên và trạng thái thắng / thua, không hiển thị HP còn lại.
+- Bổ sung unit test cho tốc độ lùi, góc nhìn ±45°, cự ly Kim Cang và reset điều kiện giao tranh.

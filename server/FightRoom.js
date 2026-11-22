@@ -9,6 +9,10 @@ import {
   blastRadiusForDamage,
   projectileIntersectsProp,
   PREP_SECONDS,
+  DISENGAGEMENT_LIMIT_SECONDS,
+  isEngagedWithOpponent,
+  advanceDisengagementTicks,
+  resolveDisengagementOutcome,
   computeAimDirection,
 } from '../src/game/rules.js';
 import { getRoomJoinRole, SPECTATOR_LIMIT } from '../src/game/spectatorCameras.js';
@@ -39,6 +43,8 @@ const CMD_BATCH_MAX = 32;
 // A client that stops sending is simulated with neutral input after this long.
 const CMD_SILENCE_MS = 250;
 const MAX_CATCH_UP_SECONDS = 0.1;
+const DISENGAGEMENT_LIMIT_TICKS = Math.ceil(DISENGAGEMENT_LIMIT_SECONDS / TICK_DT);
+const DISENGAGEMENT_MESSAGE = 'Các hạ liên tục né tránh giao tranh. Thật hèn nhát!';
 
 class PlayerState extends Schema {
   constructor() {
@@ -170,7 +176,7 @@ export class FightRoom extends Room {
     this.runtime.set(client.sessionId, {
       fighter: createFighter(player.x, player.z, player.yaw),
       queue: [], queuedSeq: 0, lastSeq: 0, lastCmdAt: 0, budget: 0,
-      burnUntil: 0, burnNextAt: 0, burnOwnerId: '', 
+      burnUntil: 0, burnNextAt: 0, burnOwnerId: '', disengagedTicks: 0,
     });
     if (this.state.players.size === 2) {
       this.state.phase = 'select';
@@ -194,6 +200,7 @@ export class FightRoom extends Room {
           rt.burnUntil = 0;
           rt.burnNextAt = 0;
           rt.burnOwnerId = '';
+          rt.disengagedTicks = 0;
           this.syncPlayer(p, rt.fighter);
         }
       }
@@ -336,6 +343,7 @@ export class FightRoom extends Room {
       if (p && rt) this.stepPlayer(id, p, rt);
     }
     if (this.state.phase === 'fight') this.stepProjectiles(TICK_DT);
+    if (this.state.phase === 'fight') this.updateDisengagement();
     // Hits move fighters after their own step, so publish positions last.
     for (const [id, p] of this.state.players) {
       const rt = this.runtime.get(id);
@@ -381,6 +389,28 @@ export class FightRoom extends Room {
       else if (event === 'charge-cancel') this.broadcast('charge-cancel', { ownerId: id });
       else if (event === 'jump') this.broadcast('jump-effect', { ownerId: id, double: fighter.jumps === 2 });
     }
+  }
+
+  updateDisengagement() {
+    const entries = [...this.state.players.entries()];
+    if (entries.length !== 2) return;
+
+    const disengaged = [];
+    for (const [id] of entries) {
+      const rt = this.runtime.get(id);
+      const opponent = this.opponentOf(id);
+      if (!rt || !opponent) continue;
+
+      rt.disengagedTicks = advanceDisengagementTicks(
+        rt.disengagedTicks,
+        isEngagedWithOpponent(rt.fighter, opponent.fighter),
+        DISENGAGEMENT_LIMIT_TICKS,
+      );
+      if (rt.disengagedTicks >= DISENGAGEMENT_LIMIT_TICKS) disengaged.push(id);
+    }
+
+    const outcome = resolveDisengagementOutcome(entries.map(([id]) => id), disengaged);
+    if (outcome) this.endMatch(outcome.winnerSessionId, outcome.reason, outcome.loserSessionIds);
   }
 
   syncPlayer(p, fighter) {
@@ -606,7 +636,7 @@ export class FightRoom extends Room {
     this.applyDamage(target, projectile.damage, projectile.ownerId, { palm: projectile.palmId, effect: projectile.effect });
   }
 
-  endMatch(winnerSessionId, reason) {
+  endMatch(winnerSessionId, reason, loserSessionIds = []) {
     if (this.ending || this.state.phase === 'end') return;
     this.ending = true;
     this.state.phase = 'end';
@@ -628,7 +658,9 @@ export class FightRoom extends Room {
       winnerSessionId: winnerSessionId || '',
       winnerName: winner?.name ?? '',
       reason,
-      players: [...this.state.players.entries()].map(([id, p]) => ({ id, name: p.name, hp: p.hp })),
+      reasonMessage: reason === 'disengagement' || reason === 'mutual_disengagement' ? DISENGAGEMENT_MESSAGE : '',
+      loserSessionIds: [...loserSessionIds],
+      players: [...this.state.players.entries()].map(([id, p]) => ({ id, name: p.name })),
     });
     this.scheduleReset();
   }

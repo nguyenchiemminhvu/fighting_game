@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ARENA_LIMIT, ARENA_PROPS, MAX_HP, PALMS, PREP_SECONDS, ROOMS, ROOM_CAPACITY, applyHealthDamage, blastRadiusForDamage, overlapsPropFootprint, projectileIntersectsProp } from '../src/game/rules.js';
+import { ARENA_LIMIT, ARENA_PROPS, MAX_HP, PALMS, PREP_SECONDS, ROOMS, ROOM_CAPACITY, applyHealthDamage, blastRadiusForDamage, overlapsPropFootprint, projectileIntersectsProp, isEngagedWithOpponent, advanceDisengagementTicks, resolveDisengagementOutcome, DISENGAGEMENT_LIMIT_SECONDS, DISENGAGEMENT_HALF_ANGLE_DEGREES } from '../src/game/rules.js';
 
 test('fixed lobby contains six two-player rooms', () => {
   assert.equal(ROOMS.length, 6);
@@ -16,6 +16,58 @@ test('fighters use a 100 HP knockout rule with no match countdown', () => {
   assert.equal(applyHealthDamage(0, 8), 0);
   assert.equal(applyHealthDamage(5, -8), 5);
   assert.equal(applyHealthDamage(100, 150), 0);
+});
+
+
+test('disengagement rule accepts opponents inside the 45-degree forward cone', () => {
+  const fighter = { x: 0, z: 0, yaw: 0 };
+  assert.equal(isEngagedWithOpponent(fighter, { x: 10, z: -10 }), true);
+  assert.equal(isEngagedWithOpponent(fighter, { x: 11, z: -10 }), false);
+  assert.equal(DISENGAGEMENT_HALF_ANGLE_DEGREES, 45);
+});
+
+test('disengagement rule accepts opponents within Great Vajra Palm range even behind the fighter', () => {
+  const fighter = { x: 0, z: 0, yaw: 0 };
+  assert.equal(isEngagedWithOpponent(fighter, { x: 0, z: 8 }), true);
+  assert.equal(isEngagedWithOpponent(fighter, { x: 0, z: 8.01 }), false);
+  assert.equal(isEngagedWithOpponent(fighter, { x: 0, z: -8.01 }), true);
+  assert.equal(isEngagedWithOpponent(fighter, { x: 0, y: 7, z: 0 }), true);
+  assert.equal(isEngagedWithOpponent(fighter, { x: 0, y: 9, z: 0 }), false);
+  assert.equal(DISENGAGEMENT_LIMIT_SECONDS, 30);
+});
+
+test('disengagement requires continuous non-engagement; facing or closing distance resets the condition', () => {
+  const fighter = { x: 0, z: 0, yaw: Math.PI };
+  const distantOpponent = { x: 0, z: -12 };
+  assert.equal(isEngagedWithOpponent(fighter, distantOpponent), false);
+  assert.equal(isEngagedWithOpponent({ ...fighter, yaw: 0 }, distantOpponent), true);
+  assert.equal(isEngagedWithOpponent(fighter, { x: 0, z: -7 }), true);
+});
+
+
+test('disengagement timer resets when engaged and triggers at 30 seconds of 60 Hz ticks', () => {
+  const limitTicks = DISENGAGEMENT_LIMIT_SECONDS * 60;
+  let ticks = 0;
+  for (let i = 0; i < limitTicks - 1; i++) ticks = advanceDisengagementTicks(ticks, false, limitTicks);
+  assert.equal(ticks, limitTicks - 1);
+  ticks = advanceDisengagementTicks(ticks, true, limitTicks);
+  assert.equal(ticks, 0);
+  for (let i = 0; i < limitTicks; i++) ticks = advanceDisengagementTicks(ticks, false, limitTicks);
+  assert.equal(ticks, limitTicks);
+  ticks = advanceDisengagementTicks(ticks, false, limitTicks);
+  assert.equal(ticks, limitTicks);
+});
+
+test('one disengaged fighter loses while simultaneous disengagement makes both lose', () => {
+  const oneLoser = resolveDisengagementOutcome(['fighter-a', 'fighter-b'], ['fighter-a']);
+  assert.deepEqual(oneLoser, {
+    winnerSessionId: 'fighter-b', reason: 'disengagement', loserSessionIds: ['fighter-a'],
+  });
+  const bothLose = resolveDisengagementOutcome(['fighter-a', 'fighter-b'], ['fighter-a', 'fighter-b']);
+  assert.deepEqual(bothLose, {
+    winnerSessionId: '', reason: 'mutual_disengagement', loserSessionIds: ['fighter-a', 'fighter-b'],
+  });
+  assert.equal(resolveDisengagementOutcome(['fighter-a', 'fighter-b'], []), null);
 });
 
 test('all five selectable palm techniques and the copy technique exist', () => {

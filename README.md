@@ -67,6 +67,9 @@ Khi bật nhảy, nhân vật mang theo vận tốc chạy lúc rời đất (đ
 - Khi người thứ hai vào phòng, cả hai có tối đa 10 giây chọn một chưởng pháp; nếu cả hai chọn xong sớm, trận đấu bắt đầu ngay.
 - Mỗi võ sinh bắt đầu với 100 HP. Sát thương từ quyền pháp / chưởng pháp trừ trực tiếp HP; ai về 0 HP trước thì thua. Trận đấu không có bộ đếm thời gian.
 - Người còn lại thắng nếu đối thủ rời trận giữa chừng.
+- Tốc độ lùi bằng S bằng 85% tốc độ tiến bằng W (4,76 so với 5,6 đơn vị/giây); tốc độ ngang không đổi khi chỉ dùng A / D.
+- Luật chống né giao tranh được server kiểm tra ở 60 tick/giây: nếu liên tục không nhìn về phía đối thủ trong 30 giây thì bị xử thua. Đối thủ được xem là trong tầm nhìn khi nằm trong nón ngang ±45°, hoặc ở cách không quá tầm Đại Lực Kim Cang Chưởng (8 đơn vị). Chuyển lại hướng nhìn hoặc áp sát vào trong tầm này sẽ reset bộ đếm. Nếu cả hai cùng chạm ngưỡng trong một tick, cả hai cùng bị xử thua với thông báo “Các hạ liên tục né tránh giao tranh. Thật hèn nhát!”.
+- Bảng kết quả chỉ hiển thị tên và trạng thái thắng / thua, không hiển thị HP còn lại.
 - Võ sinh tự chuyển về sảnh sau khi trận kết thúc; người xem được server đưa về hàng chờ sau khi cả hai võ sinh rời sàn.
 - Quyền pháp chung có chuỗi tối đa ba hit, xen kẽ hoạt ảnh đấm / đá; mỗi hit có khoảng giãn để đối thủ phục hồi.
 - Chưởng pháp: Nhất Dương Chỉ, Giáng Long Chưởng, Hàn Băng Chưởng, Hoả Diệm Đao, Đại Lực Kim Cang Chưởng và Tiểu Vô Tướng Công. Hiệu ứng đạn có tạo hình riêng: tia laser, rồng khí uốn lượn, cụm tinh thể băng, lưỡi hỏa diệm và ấn bàn tay kim cang.

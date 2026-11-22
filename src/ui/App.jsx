@@ -142,7 +142,7 @@ export function App() {
             setMatchResult((current) => current ?? {
               winnerSessionId: nextState.winnerSessionId ?? '',
               reason: nextState.resultReason ?? 'knockout',
-              players: (nextState.players ?? []).map((player) => ({ id: player.id, name: player.name, hp: player.hp })),
+              players: (nextState.players ?? []).map((player) => ({ id: player.id, name: player.name })),
             });
           }
           if (isSpectator) {
@@ -212,16 +212,18 @@ export function App() {
               <strong>{gameState.phase === 'select' ? `00:${String(gameState.prepLeft ?? 10).padStart(2, '0')}` : gameState.phase === 'end' ? 'KẾT THÚC' : 'VÔ HẠN'}</strong>
               <small>{connection}</small>
             </div>
-            <div className="spectator-scoreboard">
-              {(gameState.players ?? []).map((player, index) => (
-                <div className="spectator-score" key={player.id}>
-                  <span>{index === 0 ? 'VÕ SINH 1' : 'VÕ SINH 2'}</span>
-                  <strong>{player.name}</strong>
-                  <b>{player.hp ?? 100}<small> / 100 HP</small></b>
-                  <div className={`hp-meter spectator-hp-meter ${(player.hp ?? 100) <= 30 ? 'critical' : ''}`}><i style={{ width: `${Math.max(0, Math.min(100, player.hp ?? 100))}%` }} /></div>
-                </div>
-              ))}
-            </div>
+            {gameState.phase !== 'end' && (
+              <div className="spectator-scoreboard">
+                {(gameState.players ?? []).map((player, index) => (
+                  <div className="spectator-score" key={player.id}>
+                    <span>{index === 0 ? 'VÕ SINH 1' : 'VÕ SINH 2'}</span>
+                    <strong>{player.name}</strong>
+                    <b>{player.hp ?? 100}<small> / 100 HP</small></b>
+                    <div className={`hp-meter spectator-hp-meter ${(player.hp ?? 100) <= 30 ? 'critical' : ''}`}><i style={{ width: `${Math.max(0, Math.min(100, player.hp ?? 100))}%` }} /></div>
+                  </div>
+                ))}
+              </div>
+            )}
             <button className="leave-button" onClick={leaveMatch}>Rời chế độ xem</button>
           </header>
         ) : (
@@ -229,8 +231,12 @@ export function App() {
             <div className="fighter-score">
               <span className="fighter-caption">BẠN</span>
               <strong>{localPlayer?.name ?? name}</strong>
-              <span className="hp-number">{localPlayer?.hp ?? 100}<small> / 100 HP</small></span>
-              <div className={`hp-meter ${(localPlayer?.hp ?? 100) <= 30 ? 'critical' : ''}`}><i style={{ width: `${Math.max(0, Math.min(100, localPlayer?.hp ?? 100))}%` }} /></div>
+              {gameState.phase !== 'end' && (
+                <>
+                  <span className="hp-number">{localPlayer?.hp ?? 100}<small> / 100 HP</small></span>
+                  <div className={`hp-meter ${(localPlayer?.hp ?? 100) <= 30 ? 'critical' : ''}`}><i style={{ width: `${Math.max(0, Math.min(100, localPlayer?.hp ?? 100))}%` }} /></div>
+                </>
+              )}
               <span className="score-status">{localPlayer?.slowT > 0 ? 'Hàn khí' : localPlayer?.burnT > 0 ? 'Thiêu đốt' : 'Võ sinh'}</span>
             </div>
             <div className="match-clock">
@@ -241,8 +247,12 @@ export function App() {
             <div className="fighter-score opponent-score">
               <span className="fighter-caption">ĐỐI THỦ</span>
               <strong>{opponent?.name ?? 'Đang chờ người chơi'}</strong>
-              <span className="hp-number">{opponent?.hp ?? 100}<small> / 100 HP</small></span>
-              <div className={`hp-meter ${(opponent?.hp ?? 100) <= 30 ? 'critical' : ''}`}><i style={{ width: `${Math.max(0, Math.min(100, opponent?.hp ?? 100))}%` }} /></div>
+              {gameState.phase !== 'end' && (
+                <>
+                  <span className="hp-number">{opponent?.hp ?? 100}<small> / 100 HP</small></span>
+                  <div className={`hp-meter ${(opponent?.hp ?? 100) <= 30 ? 'critical' : ''}`}><i style={{ width: `${Math.max(0, Math.min(100, opponent?.hp ?? 100))}%` }} /></div>
+                </>
+              )}
               <span className="score-status">{opponent?.slowT > 0 ? 'Hàn khí' : opponent?.burnT > 0 ? 'Thiêu đốt' : opponent ? 'Đối thủ' : 'Chưa ghép cặp'}</span>
             </div>
             <button className="leave-button" onClick={leaveMatch}>Rời sàn</button>
@@ -332,13 +342,38 @@ export function App() {
         {matchResult && (
           <section className="result-panel glass-panel">
             <span className="eyebrow">TRẬN ĐẤU ĐÃ KẾT THÚC</span>
-            <h2>{isSpectator ? 'TRẬN ĐẤU ĐÃ HẠ MÀN' : matchResult.winnerSessionId === gameState.localId ? 'ĐẠI HIỆP ĐẠI THẮNG' : matchResult.winnerSessionId ? 'THẤT BẠI' : 'BẤT PHÂN THẮNG BẠI'}</h2>
-            <p>{isSpectator ? 'Bạn sẽ được đưa về hàng chờ khi hai võ sinh rời sàn đấu.' : matchResult.reason === 'forfeit' ? 'Đối thủ đã rời trận.' : 'HP của đối thủ đã giảm về 0.'}</p>
-            <div className="result-hp">
-              {(matchResult.players ?? []).map((player) => (
-                <div key={player.id}><span>{player.name}</span><strong>{player.hp} HP</strong></div>
-              ))}
-            </div>
+            <h2>{matchResult.reason === 'mutual_disengagement'
+              ? 'CẢ HAI ĐỀU BỊ XỬ THUA'
+              : isSpectator
+                ? 'TRẬN ĐẤU ĐÃ HẠ MÀN'
+                : matchResult.winnerSessionId === gameState.localId
+                  ? 'ĐẠI HIỆP ĐẠI THẮNG'
+                  : matchResult.winnerSessionId ? 'THẤT BẠI' : 'BẤT PHÂN THẮNG BẠI'}</h2>
+            <p>{matchResult.reason === 'mutual_disengagement'
+              ? 'Các hạ liên tục né tránh giao tranh. Thật hèn nhát!'
+              : matchResult.reason === 'disengagement'
+                ? isSpectator
+                  ? 'Một võ sinh bị xử thua. Các hạ liên tục né tránh giao tranh. Thật hèn nhát!'
+                  : matchResult.winnerSessionId === gameState.localId
+                    ? 'Đối thủ bị xử thua vì liên tục né tránh giao tranh.'
+                    : 'Các hạ liên tục né tránh giao tranh. Thật hèn nhát!'
+                : isSpectator
+                  ? 'Bạn sẽ được đưa về hàng chờ khi hai võ sinh rời sàn đấu.'
+                  : matchResult.reason === 'forfeit' ? 'Đối thủ đã rời trận.' : 'HP của đối thủ đã giảm về 0.'}</p>
+            {(matchResult.players ?? []).length > 0 && (
+              <div className="result-players">
+                {(matchResult.players ?? []).map((player) => (
+                  <div key={player.id}>
+                    <span>{player.name}</span>
+                    <strong>{matchResult.reason === 'mutual_disengagement'
+                      ? 'Bị xử thua'
+                      : player.id === matchResult.winnerSessionId
+                        ? 'Chiến thắng'
+                        : 'Thất bại'}</strong>
+                  </div>
+                ))}
+              </div>
+            )}
             {!isSpectator && <span className="return-countdown">Tự động về hàng chờ sau vài giây…</span>}
             <button className="primary-button" onClick={leaveMatch}>{isSpectator ? 'Rời chế độ xem' : 'Về hàng chờ ngay'}</button>
           </section>

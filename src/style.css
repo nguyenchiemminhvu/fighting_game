@@ -167,9 +167,9 @@ kbd { padding: 2px 5px; border: 1px solid rgba(206,175,132,.4); color: #e4c18c; 
 .result-panel { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(420px, calc(100% - 32px)); padding: 28px; text-align: center; }
 .result-panel h2 { font-size: 26px; }
 .result-panel p { color: #a99c88; font-size: 10px; }
-.result-hp { border-top: 1px solid rgba(201,165,113,.2); border-bottom: 1px solid rgba(201,165,113,.2); margin: 17px 0; padding: 6px 0; }
-.result-hp div { display: flex; justify-content: space-between; padding: 7px 2px; font-size: 10px; color: #c7b69a; }
-.result-hp strong { font: 19px 'Marcellus', Georgia, serif; color: #e8c18a; }
+.result-players { border-top: 1px solid rgba(201,165,113,.2); border-bottom: 1px solid rgba(201,165,113,.2); margin: 17px 0; padding: 6px 0; }
+.result-players div { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 7px 2px; font-size: 10px; color: #c7b69a; }
+.result-players strong { color: #e8c18a; font-size: 10px; }
 .return-countdown { display: block; margin-bottom: 13px; color: #948879; font-size: 8px; }
 .game-error { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); background: #582a24; border: 1px solid #a65b48; padding: 10px 14px; font-size: 9px; }
 

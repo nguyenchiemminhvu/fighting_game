@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PALMS } from '../src/game/rules.js';
 import {
-  NEUTRAL_CMD, RUN_SPEED, TICK_DT,
+  NEUTRAL_CMD, RUN_SPEED, BACKWARD_SPEED, TICK_DT,
   createFighter, decodeCmd, displaceFighter, encodeCmd, packFighter, stepFighter, unpackFighter,
 } from '../src/game/fighter.js';
 
@@ -43,7 +43,18 @@ test('a running jump carries its velocity and cannot be steered until landing', 
   for (let i = 0; i < 240 && !fighter.grounded; i++) stepFighter(fighter, input(), TICK_DT);
   assert.equal(fighter.grounded, true);
   run(fighter, 2, input({ f: -1 }));
-  near(fighter.vz, RUN_SPEED);
+  near(fighter.vz, BACKWARD_SPEED);
+});
+
+test('backward movement is slightly slower than forward movement', () => {
+  const forward = createFighter(0, 0, 0);
+  const backward = createFighter(0, 0, 0);
+  run(forward, 10, input({ f: 1 }));
+  run(backward, 10, input({ f: -1 }));
+  near(Math.abs(forward.vz), RUN_SPEED);
+  near(Math.abs(backward.vz), BACKWARD_SPEED);
+  assert.ok(BACKWARD_SPEED < RUN_SPEED);
+  assert.ok(BACKWARD_SPEED >= RUN_SPEED * 0.8);
 });
 
 test('a jump from standstill goes straight up', () => {

@@ -8,6 +8,7 @@ export const TICK_RATE = 60;
 export const TICK_DT = 1 / TICK_RATE;
 
 export const RUN_SPEED = 5.6;
+export const BACKWARD_SPEED = RUN_SPEED * 0.85;
 export const SLOW_SPEED = 2.9;
 export const DASH_SPEED = 16.5;
 export const DASH_SECONDS = 0.17;
@@ -320,7 +321,10 @@ export function stepFighter(fighter, cmd, dt = TICK_DT, events = null) {
     if (f.grounded) {
       const magnitude = Math.hypot(cmd.f, cmd.r);
       if (magnitude > 0.08) {
-        const scale = (f.slowT > 0 ? SLOW_SPEED : RUN_SPEED) / Math.max(1, magnitude);
+        const moveSpeed = f.slowT > 0
+          ? SLOW_SPEED
+          : cmd.f < -0.08 ? BACKWARD_SPEED : RUN_SPEED;
+        const scale = moveSpeed / Math.max(1, magnitude);
         f.vx = (-Math.sin(f.yaw) * cmd.f - Math.cos(f.yaw) * cmd.r) * scale;
         f.vz = (-Math.cos(f.yaw) * cmd.f + Math.sin(f.yaw) * cmd.r) * scale;
       } else {
