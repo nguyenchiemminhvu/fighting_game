@@ -51,7 +51,7 @@ npm start       # chạy server; nếu dist/ tồn tại server cũng phục v�
 | C (giữ) | Vận khí và tự động phát chưởng khi đủ thời gian |
 | Space | Nhảy; nhấn lần hai khi đang trên không để khinh công. Cú nhảy giữ nguyên vận tốc đang chạy |
 
-Camera ở góc nhìn sau-vai, cao hơn vai một chút; kéo chuột đổi hướng nhìn độc lập với góc nâng/hạ của camera. Di chuyển ngang A/D được quy chiếu theo trục màn hình của camera. Bộ pháp có hồi chiêu 3 giây. Trong khi ra chiêu, nhân vật bị khóa điều khiển di chuyển; ngoại lệ là lướt bằng bộ pháp.
+Camera ở góc nhìn sau-vai, cao hơn vai một chút; kéo chuột đổi hướng nhìn độc lập với góc nâng/hạ của camera. Di chuyển ngang A/D được quy chiếu theo trục màn hình của camera. Bộ pháp có hồi chiêu 3 giây. Trong khi ra chiêu, nhân vật bị khóa điều khiển di chuyển; ngoại lệ là lướt bằng bộ pháp. Camera tự dò vật cản trên đường nhìn; vật thể gần camera nhất đang che nhân vật sẽ tạm mờ dần, rồi hiện lại khi camera thông thoáng. Việc này chỉ tác động đến vật liệu render của đúng mesh bị che, không thay đổi collider hay vật lý.
 
 Khi bật nhảy, nhân vật mang theo vận tốc chạy lúc rời đất (đứng yên thì nhảy thẳng đứng). Vận tốc ngang đó bị khoá cho đến khi chạm đất — kể cả khi khinh công lần hai — nên phải chọn hướng trước khi nhảy. Khi ở trên không, không thể dùng quyền pháp hoặc bộ pháp, nhưng có thể giữ C để vận khí chưởng: nhân vật đứng yên tại độ cao hiện tại trong lúc vận khí, mất hết quán tính, rồi rơi thẳng xuống sau khi chưởng được phát. Chạy áp sát rồi nhảy để lên bục, đá hoặc tường thấp và di chuyển trên đó.
 

@@ -1,6 +1,6 @@
 import HavokPhysics from '@babylonjs/havok';
 import {
-  Engine, Scene, Vector3, Color3,
+  Engine, Scene, Vector3, Color3, Ray,
   FreeCamera, HemisphericLight, DirectionalLight, PointLight,
   StandardMaterial, DynamicTexture, MeshBuilder, TransformNode,
   ShadowGenerator, GlowLayer,
@@ -25,6 +25,7 @@ const ERROR_SNAP_DISTANCE = 9;
 const MAX_FRAME_SECONDS = 0.25;
 const MAX_PENDING_CMDS = 180;
 const STRIDE_PER_UNIT = 2.15;
+const CAMERA_OCCLUSION_ALPHA = 0.2;
 
 const clamp1 = (value) => Math.max(-1, Math.min(1, value));
 const damp = (current, target, rate, dt) => current + (target - current) * (1 - Math.exp(-rate * dt));
@@ -396,6 +397,71 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
   const camera = new FreeCamera(spectatorMode ? 'spectator-camera' : 'third-person-camera', new Vector3(0, 5, 10), scene);
   camera.minZ = 0.1; camera.maxZ = 250; camera.fov = spectatorMode ? 1.06 : 0.86; camera.inertia = 0;
   scene.activeCamera = camera;
+
+  // Only the meshes that also define physical arena obstacles can occlude the
+  // player camera. We fade their render material per-mesh, leaving shared
+  // materials, Havok bodies and server-side collision geometry untouched.
+  const cameraOccluders = new Set(arena.props);
+  const fadedCameraOccluders = new Map();
+
+  function updateCameraOcclusion(delta) {
+    if (spectatorMode || cameraOccluders.size === 0) return;
+    // Cast from the camera towards the fighter. Fade every physical prop the
+    // view ray crosses: a translucent surface can still occlude a second wall
+    // or door panel behind it, so fading only the first hit is not sufficient.
+    const rayVector = lookTarget.subtract(camera.position);
+    const rayLength = rayVector.length();
+    if (rayLength <= 0.05) return;
+
+    const ray = new Ray(camera.position, rayVector.scale(1 / rayLength), rayLength);
+    const picks = scene.multiPickWithRay(ray, (mesh) => cameraOccluders.has(mesh)) ?? [];
+    const blockedMeshes = new Set(
+      picks.filter((pick) => pick.hit && pick.pickedMesh).map((pick) => pick.pickedMesh),
+    );
+
+    // Clone a material for each affected mesh: most arena props share a small
+    // palette, and fading a shared material would make unrelated walls vanish.
+    for (const mesh of blockedMeshes) {
+      if (fadedCameraOccluders.has(mesh)) continue;
+      const originalMaterial = mesh.material;
+      if (!originalMaterial || typeof originalMaterial.clone !== 'function') continue;
+      const originalAlpha = Number.isFinite(originalMaterial.alpha) ? originalMaterial.alpha : 1;
+      const fadedAlpha = Math.min(originalAlpha, CAMERA_OCCLUSION_ALPHA);
+      if (originalAlpha - fadedAlpha < 0.025) continue;
+      const fadedMaterial = originalMaterial.clone(`${originalMaterial.name}-camera-fade-${mesh.uniqueId}`);
+      if (!fadedMaterial) continue;
+      mesh.material = fadedMaterial;
+      fadedCameraOccluders.set(mesh, {
+        originalMaterial,
+        fadedMaterial,
+        originalAlpha,
+        fadedAlpha,
+        currentAlpha: originalAlpha,
+      });
+    }
+
+    for (const [mesh, fade] of fadedCameraOccluders) {
+      const isBlocked = blockedMeshes.has(mesh);
+      const targetAlpha = isBlocked ? fade.fadedAlpha : fade.originalAlpha;
+      fade.currentAlpha = damp(fade.currentAlpha, targetAlpha, isBlocked ? 26 : 9, delta);
+      fade.fadedMaterial.alpha = fade.currentAlpha;
+
+      // Restore the exact original material once the fade-out is complete.
+      if (!isBlocked && Math.abs(fade.currentAlpha - fade.originalAlpha) < 0.015) {
+        mesh.material = fade.originalMaterial;
+        fade.fadedMaterial.dispose();
+        fadedCameraOccluders.delete(mesh);
+      }
+    }
+  }
+
+  function restoreCameraOccluders() {
+    for (const [mesh, fade] of fadedCameraOccluders) {
+      if (!mesh.isDisposed()) mesh.material = fade.originalMaterial;
+      fade.fadedMaterial.dispose();
+    }
+    fadedCameraOccluders.clear();
+  }
 
   const palettes = [
     { robe: '#a8442f', trim: '#e2bb81', sash: '#302b28' },
@@ -1080,6 +1146,7 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
             anchor.z + fwd.z * 5.4,
           );
           camera.setTarget(lookTarget);
+          updateCameraOcclusion(delta);
         }
       }
       if (callbacks.onState && now - lastHudSend > 100) {
@@ -1186,6 +1253,7 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
         canvas.removeEventListener('contextmenu', onContextMenu);
         if (document.pointerLockElement === canvas) document.exitPointerLock?.();
       }
+      restoreCameraOccluders();
       for (const effect of fx.values()) { effect.root.dispose(false, false); effect.materials.forEach((material) => material.dispose()); }
       for (const ring of rings) { ring.mesh.dispose(); ring.material.dispose(); }
       for (const explosion of explosions) { explosion.mesh.dispose(); explosion.material.dispose(); }

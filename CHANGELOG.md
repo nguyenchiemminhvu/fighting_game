@@ -1,3 +1,10 @@
+## Camera góc nhìn thứ ba tự tránh vật cản
+
+- Camera người chơi dò tia nhìn từ vị trí camera về điểm ngắm trên nhân vật; các mesh vật cản nằm trực tiếp trên tia nhìn sẽ được tạm làm mờ, thay vì làm trong suốt toàn bộ tường hoặc đổi vị trí camera đột ngột.
+- Vật cản mờ dần xuống alpha 0.2; khi tia nhìn thông thoáng, vật liệu gốc được phục hồi mượt mà. Nhiều lớp cửa / tường nằm nối tiếp trên cùng tia nhìn cũng được làm mờ để không còn lớp chắn thứ hai.
+- Chỉ clone material cho đúng mesh đang che camera; vật liệu dùng chung của các mesh khác không bị ảnh hưởng. Khi rời trận / hủy scene, material gốc được khôi phục và bản clone được giải phóng.
+- Hệ thống chỉ thay đổi render material, không sửa kích thước collider, Havok, va chạm server/client, vật lý chưởng pháp hay camera của người xem.
+
 ## Phòng 6 – Trước cổng công ty
 
 - Tách cấu hình đấu trường theo `map` thay vì áp dụng một bộ `ARENA_PROPS` cho cả sáu phòng; phòng 1–5 giữ nguyên hình học cổ điển.
