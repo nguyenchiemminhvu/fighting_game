@@ -115,9 +115,12 @@ function isFree(fighter) {
 // Push the fighter's body circle out of every prop whose vertical span
 // intersects the character. Raised props (for example the hall roof) also
 // block the character below their base instead of behaving as decorations.
-function resolveProps(fighter) {
+function resolveProps(fighter, arena = null) {
+  const props = arena?.props ?? ARENA_PROPS;
+  const limitX = arena?.limitX ?? ARENA_LIMIT;
+  const limitZ = arena?.limitZ ?? ARENA_LIMIT;
   for (let pass = 0; pass < 3; pass++) {
-    for (const prop of ARENA_PROPS) {
+    for (const prop of props) {
       const baseY = prop.baseY ?? 0;
       const topY = baseY + prop.h;
       if (fighter.y >= topY - STEP_CLEARANCE || fighter.y + CHARACTER_HEIGHT <= baseY) continue;
@@ -159,17 +162,17 @@ function resolveProps(fighter) {
       }
     }
   }
-  fighter.x = clamp(fighter.x, -ARENA_LIMIT, ARENA_LIMIT);
-  fighter.z = clamp(fighter.z, -ARENA_LIMIT, ARENA_LIMIT);
+  fighter.x = clamp(fighter.x, -limitX, limitX);
+  fighter.z = clamp(fighter.z, -limitZ, limitZ);
 }
 
 // Horizontal displacement with collision; also used by the server for knockback.
-export function displaceFighter(fighter, dx, dz) {
+export function displaceFighter(fighter, dx, dz, arena = null) {
   const slices = Math.max(1, Math.ceil(Math.hypot(dx, dz) / MAX_MOVE_SLICE));
   for (let i = 0; i < slices; i++) {
     fighter.x += dx / slices;
     fighter.z += dz / slices;
-    resolveProps(fighter);
+    resolveProps(fighter, arena);
   }
 }
 
@@ -187,13 +190,13 @@ export function stunFighter(fighter, seconds) {
   fighter.vz = 0;
 }
 
-function applyGravity(fighter, dt) {
+function applyGravity(fighter, dt, arena = null) {
   const oldY = fighter.y;
   fighter.vy -= GRAVITY * dt;
   const nextY = oldY + fighter.vy * dt;
   let support = 0;
   if (fighter.vy <= 0) {
-    for (const prop of ARENA_PROPS) {
+    for (const prop of (arena?.props ?? ARENA_PROPS)) {
       const topY = (prop.baseY ?? 0) + prop.h;
       if (oldY < topY - 0.08 || nextY > topY) continue;
       if (overlapsPropFootprint(fighter.x, fighter.z, SUPPORT_RADIUS, prop)) support = Math.max(support, topY);
@@ -212,7 +215,7 @@ function applyGravity(fighter, dt) {
 
 // Advance one fighter by one input command. `events` (optional) collects what
 // the server must act on: 'strike', 'launch', 'charge-begin', 'charge-cancel', 'jump'.
-export function stepFighter(fighter, cmd, dt = TICK_DT, events = null) {
+export function stepFighter(fighter, cmd, dt = TICK_DT, events = null, arena = null) {
   const f = fighter;
   f.cooldown = Math.max(0, f.cooldown - dt);
   f.dashCd = Math.max(0, f.dashCd - dt);
@@ -350,8 +353,8 @@ export function stepFighter(fighter, cmd, dt = TICK_DT, events = null) {
     moveZ = f.vz * dt;
   }
 
-  if (moveX !== 0 || moveZ !== 0) displaceFighter(f, moveX, moveZ);
-  if (gravity) applyGravity(f, dt);
+  if (moveX !== 0 || moveZ !== 0) displaceFighter(f, moveX, moveZ, arena);
+  if (gravity) applyGravity(f, dt, arena);
 
   if (isFree(f)) {
     f.action = !f.grounded ? 'jump' : (f.vx !== 0 || f.vz !== 0) ? 'run' : 'idle';

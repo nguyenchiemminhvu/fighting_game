@@ -1,8 +1,7 @@
 import { Room } from '@colyseus/core';
 import { Schema, MapSchema, defineTypes } from '@colyseus/schema';
 import {
-  ARENA_LIMIT,
-  ARENA_PROPS,
+  getArenaDefinition,
   MAX_HP,
   PALMS,
   applyHealthDamage,
@@ -110,6 +109,7 @@ export class FightRoom extends Room {
   onCreate(options) {
     this.roomKey = options.roomKey;
     this.roomLabel = options.label;
+    this.arena = getArenaDefinition(options.map);
     // Two fighter seats plus up to ten read-only spectator connections.
     this.maxClients = 2 + SPECTATOR_LIMIT;
     this.autoDispose = false;
@@ -166,10 +166,11 @@ export class FightRoom extends Room {
     const slot = this.state.players.size;
     const player = new PlayerState();
     player.name = safeName(options?.name);
-    player.x = 0;
+    const spawn = this.arena.spawns[slot] ?? this.arena.spawns[0];
+    player.x = spawn.x;
     player.y = 0;
-    player.z = slot === 0 ? 4.5 : -4.5;
-    player.yaw = slot === 0 ? 0 : Math.PI;
+    player.z = spawn.z;
+    player.yaw = spawn.yaw;
     player.palm = 'chi';
     player.activePalm = 'chi';
     this.state.players.set(client.sessionId, player);
@@ -381,7 +382,7 @@ export class FightRoom extends Room {
     const fighter = rt.fighter;
     const events = this.events;
     events.length = 0;
-    stepFighter(fighter, cmd, TICK_DT, events);
+    stepFighter(fighter, cmd, TICK_DT, events, this.arena);
     for (const event of events) {
       if (event === 'strike') this.meleeStrike(id, fighter);
       else if (event === 'launch') this.launchPalm(id, fighter);
@@ -453,7 +454,7 @@ export class FightRoom extends Room {
     if (d > 2.25 || dot < 0.58 || Math.abs(dy) > 1.5) return;
     const damage = fighter.actionStep === 3 ? 11 : 8;
     const wasCharging = tf.action === 'charge';
-    displaceFighter(tf, (dx / d) * 0.85, (dz / d) * 0.85);
+    displaceFighter(tf, (dx / d) * 0.85, (dz / d) * 0.85, this.arena);
     stunFighter(tf, wasCharging ? 0.26 : 0.19);
     this.broadcast('impact', { palm: 'fist', x: tf.x, y: tf.y + 1, z: tf.z, targetId: target.id, damage });
     this.applyDamage(target, damage, id, { palm: 'fist', effect: 'melee' });
@@ -509,7 +510,7 @@ export class FightRoom extends Room {
       projectile.traveled += Math.hypot(sx, sy, sz);
       projectile.life -= dt;
       const solid = projectile.terrainRadius;
-      const blocked = projectile.y <= solid || ARENA_PROPS.some((prop) =>
+      const blocked = projectile.y <= solid || this.arena.props.some((prop) =>
         projectileIntersectsProp(projectile.x, projectile.y, projectile.z, solid, prop),
       );
       const target = this.opponentOf(projectile.ownerId);
@@ -545,7 +546,7 @@ export class FightRoom extends Room {
         }
       }
 
-      if (blocked || hit || projectile.life <= 0 || projectile.traveled >= projectile.range || Math.abs(projectile.x) > ARENA_LIMIT + 2 || Math.abs(projectile.z) > ARENA_LIMIT + 2) {
+      if (blocked || hit || projectile.life <= 0 || projectile.traveled >= projectile.range || Math.abs(projectile.x) > this.arena.limitX + 2 || Math.abs(projectile.z) > this.arena.limitZ + 2) {
         if (!blocked) this.broadcast('projectile-end', { id: projectile.id, x: projectile.x, y: projectile.y, z: projectile.z, hit });
       } else {
         survivors.push(projectile);
@@ -614,7 +615,7 @@ export class FightRoom extends Room {
       let dz = projectile.depth > 0 ? projectile.vz : tf.z - projectile.z;
       const d = Math.hypot(dx, dz) || 1;
       dx /= d; dz /= d;
-      displaceFighter(tf, dx * projectile.knockback, dz * projectile.knockback);
+      displaceFighter(tf, dx * projectile.knockback, dz * projectile.knockback, this.arena);
     }
     if (projectile.effect === 'slow') tf.slowT = projectile.slowSeconds;
     if (projectile.effect === 'burn') {

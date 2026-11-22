@@ -8,7 +8,7 @@ import {
 import { HavokPlugin } from '@babylonjs/core/Physics/v2/Plugins/havokPlugin';
 import { PhysicsAggregate } from '@babylonjs/core/Physics/v2/physicsAggregate';
 import { PhysicsShapeType } from '@babylonjs/core/Physics/v2/IPhysicsEnginePlugin';
-import { ARENA_PROPS, PALMS } from './rules.js';
+import { getArenaDefinition, ROOMS, PALMS } from './rules.js';
 import { SPECTATOR_CAMERAS, getSpectatorCameraPose } from './spectatorCameras.js';
 import {
   DASH_KEYS, RUN_SPEED, TICK_DT,
@@ -150,7 +150,120 @@ function buildFighter(scene, shadowGenerator, id, name, palette) {
   };
 }
 
-function buildArena(scene, roomKey, shadowGenerator) {
+function addOfficeBox(scene, shadowGenerator, name, dimensions, position, material) {
+  const mesh = MeshBuilder.CreateBox(name, dimensions, scene);
+  mesh.position.set(position.x, position.y, position.z);
+  mesh.material = material;
+  mesh.receiveShadows = true;
+  shadowGenerator.addShadowCaster(mesh, true);
+  return mesh;
+}
+
+function addOfficeSign(scene, name, text, width, height, position, rotationY, color = '#e8edf0') {
+  const plane = MeshBuilder.CreatePlane(name, { width, height }, scene);
+  plane.position.set(position.x, position.y, position.z);
+  plane.rotation.y = rotationY;
+  const texture = new DynamicTexture(`${name}-texture`, { width: 1024, height: 256 }, scene, true);
+  texture.hasAlpha = true;
+  texture.drawText(text, null, 170, 'bold 54px Arial', color, 'transparent', true);
+  const material = new StandardMaterial(`${name}-material`, scene);
+  material.diffuseTexture = texture;
+  material.opacityTexture = texture;
+  material.emissiveColor = Color3.FromHexString(color);
+  material.disableLighting = true;
+  material.backFaceCulling = false;
+  plane.material = material;
+  return plane;
+}
+
+function buildOfficeDetails(scene, shadowGenerator) {
+  const floorInset = makeMat(scene, 'office-floor-inset', '#414a50');
+  const floorTile = makeMat(scene, 'office-floor-tile', '#59636a');
+  const floorLine = makeMat(scene, 'office-floor-line', '#9ba7aa', { emissive: '#20292e' });
+  const metal = makeMat(scene, 'office-metal-trim', '#84939a', { metallic: true });
+  const elevatorDoor = makeMat(scene, 'office-elevator-door', '#64747c', { metallic: true });
+  const elevatorInset = makeMat(scene, 'office-elevator-inset', '#27343b', { metallic: true });
+  const display = makeMat(scene, 'office-display', '#6ac8d7', { emissive: '#2d9eb2' });
+  const ceilingLight = makeMat(scene, 'office-ceiling-light', '#d8edf0', { emissive: '#9dcbd3' });
+  const benchTop = makeMat(scene, 'office-bench-top', '#8b9698');
+
+  // Floor finishes are decals/skins over the single ground collider. Both
+  // rectangles are flush with the floor and trace the real narrow-stem + wide
+  // crossbar silhouette, rather than leaving the old circular martial-arts ring.
+  const stemFloor = MeshBuilder.CreateGround('office-stem-floor', { width: 9.0, height: 16.4 }, scene);
+  stemFloor.position.set(0, 0.002, -5.0); stemFloor.material = floorInset; stemFloor.receiveShadows = true;
+  const lobbyFloor = MeshBuilder.CreateGround('office-lobby-floor', { width: 26.8, height: 10.8 }, scene);
+  lobbyFloor.position.set(0, 0.002, 8.5); lobbyFloor.material = floorInset; lobbyFloor.receiveShadows = true;
+  for (const x of [-4.25, 4.25]) {
+    addOfficeBox(scene, shadowGenerator, `office-stem-edge-line-${x}`,
+      { width: 0.045, height: 0.003, depth: 16.0 }, { x, y: 0.004, z: -5.0 }, floorLine);
+  }
+  for (let x = -12; x <= 12; x += 2) {
+    addOfficeBox(scene, shadowGenerator, `office-lobby-tile-${x}`,
+      { width: 0.025, height: 0.003, depth: 10.2 }, { x, y: 0.004, z: 8.5 }, floorTile);
+  }
+
+  // Elevator doors are shallow finish panels mounted directly onto the solid
+  // elevator walls. The wall boxes underneath remain the exact server and
+  // Havok collider volumes, so a rendered door cannot become a walk-through.
+  for (const side of [-1, 1]) {
+    // These are the exposed faces of the door props in OFFICE_GATE_PROPS.
+    // Frame, status display and split seam stay entirely within each door box.
+    const doorFaceX = side < 0 ? -4.44 : 4.44;
+    for (const [index, z] of [-9.4, -5.2, -1.0].entries()) {
+      for (const edgeZ of [-0.86, 0.86]) {
+        addOfficeBox(scene, shadowGenerator, `office-elevator-frame-${side}-${index}-${edgeZ}`,
+          { width: 0.09, height: 2.42, depth: 0.09 },
+          { x: doorFaceX + side * 0.045, y: 1.34, z: z + edgeZ }, metal);
+      }
+      addOfficeBox(scene, shadowGenerator, `office-elevator-header-${side}-${index}`,
+        { width: 0.09, height: 0.08, depth: 1.84 },
+        { x: doorFaceX + side * 0.045, y: 2.51, z }, metal);
+      addOfficeBox(scene, shadowGenerator, `office-elevator-display-${side}-${index}`,
+        { width: 0.02, height: 0.32, depth: 0.2 },
+        { x: doorFaceX + side * 0.01, y: 2.08, z: z + (side < 0 ? 0.73 : -0.73) }, display);
+      addOfficeBox(scene, shadowGenerator, `office-elevator-door-seam-${side}-${index}`,
+        { width: 0.006, height: 2.25, depth: 0.025 },
+        { x: doorFaceX + side * 0.003, y: 1.34, z }, elevatorInset);
+    }
+  }
+
+  // Card-reader screens are separate small props and use their exact box
+  // colliders; the cylinders below them remain the turnstile post colliders.
+  addOfficeSign(scene, 'office-entry-sign', 'CỔNG KIỂM SOÁT  ·  QUÉT THẺ', 5.1, 0.34,
+    { x: 0, y: 3.22, z: -13.475 }, 0, '#e5eef0');
+
+  // Waiting-bench seat surfaces are skins over the corresponding low platform
+  // colliders; jumping onto either platform uses the exact prop top height.
+  for (const [index, x] of [-10.2, 10.2].entries()) {
+    addOfficeBox(scene, shadowGenerator, `office-bench-seat-${index}`,
+      { width: 2.9, height: 0.004, depth: 0.84 }, { x, y: 0.682, z: 8.1 }, benchTop);
+  }
+
+  // Wall-mounted light strips are embedded into collision-backed walls, so
+  // they do not float over the open-air lobby or introduce phantom obstacles.
+  const lightPoints = [
+    { x: -4.5025, y: 3.12, z: -10.7, side: -1 },
+    { x: 4.5025, y: 3.12, z: -10.7, side: 1 },
+    { x: -4.5025, y: 3.12, z: -6.2, side: -1 },
+    { x: 4.5025, y: 3.12, z: -6.2, side: 1 },
+    { x: -4.5025, y: 3.12, z: -1.7, side: -1 },
+    { x: 4.5025, y: 3.12, z: -1.7, side: 1 },
+    { x: -13.73, y: 2.75, z: 6.0, side: -1 },
+    { x: 13.73, y: 2.75, z: 6.0, side: 1 },
+  ];
+  lightPoints.forEach(({ x, y, z, side }, index) => {
+    addOfficeBox(scene, shadowGenerator, `office-wall-light-${index}`,
+      { width: 0.055, height: 0.3, depth: 1.2 }, { x, y, z }, ceilingLight);
+    const light = new PointLight(`office-wall-light-source-${index}`,
+      new Vector3(x - side * 0.16, y - 0.1, z), scene);
+    light.diffuse = new Color3(0.68, 0.86, 0.92);
+    light.intensity = 0.24;
+    light.range = 6;
+  });
+}
+
+function buildArena(scene, roomKey, shadowGenerator, arenaDefinition) {
   const arenaThemes = [
     { ground: '#39352f', lantern: '#ffb56c' },
     { ground: '#45413b', lantern: '#f1c77b' },
@@ -160,13 +273,19 @@ function buildArena(scene, roomKey, shadowGenerator) {
     { ground: '#423640', lantern: '#c4a2dc' },
   ];
   const roomNumber = Number(String(roomKey).match(/\d+/)?.[0] ?? 1);
-  const theme = arenaThemes[(Math.max(1, roomNumber) - 1) % arenaThemes.length];
+  const isOffice = arenaDefinition.id === 'office-gate';
+  const theme = isOffice
+    ? { ground: '#30373c', lantern: '#8ccbd8' }
+    : arenaThemes[(Math.max(1, roomNumber) - 1) % arenaThemes.length];
   const groundMat = makeMat(scene, 'arena-ground', theme.ground);
   const edgeMat = makeMat(scene, 'arena-edge', '#8b6844', { metallic: true });
   const woodMat = makeMat(scene, 'old-wood', '#62422e');
   const stoneMat = makeMat(scene, 'weathered-stone', '#77736c');
   const darkStoneMat = makeMat(scene, 'dark-stone', '#464744');
-  const tileMat = makeMat(scene, 'tile-lines', '#5a5145');
+  const concreteMat = makeMat(scene, 'office-concrete', '#6d777c');
+  const metalMat = makeMat(scene, 'office-structure-metal', '#596a73', { metallic: true });
+  const glassMat = makeMat(scene, 'office-structure-glass', '#76b7c4', { alpha: 0.48, metallic: true });
+  const readerDisplayMat = makeMat(scene, 'office-reader-display-material', '#6ac8d7', { emissive: '#2d9eb2' });
   const ground = MeshBuilder.CreateGround('arena-ground', { width: 32, height: 32, subdivisions: 2 }, scene);
   ground.material = groundMat; ground.receiveShadows = true;
   // A kinematic collision world is mirrored on the server. Havok supplies the
@@ -175,27 +294,43 @@ function buildArena(scene, roomKey, shadowGenerator) {
   const ring = MeshBuilder.CreateTorus('arena-circular-mark', { diameter: 11.5, thickness: 0.075, tessellation: 64 }, scene);
   ring.position.y = 0.025; ring.material = edgeMat;
   const innerRing = MeshBuilder.CreateTorus('arena-inner-mark', { diameter: 5.3, thickness: 0.035, tessellation: 48 }, scene);
-  innerRing.position.y = 0.025; innerRing.material = tileMat;
-  for (let i = 0; i < 12; i++) {
-    const angle = (Math.PI * 2 * i) / 12;
-    const mark = MeshBuilder.CreateBox(`floor-mark-${i}`, { width: 0.045, height: 0.018, depth: 1.6 }, scene);
-    mark.position.set(Math.sin(angle) * 7.0, 0.018, Math.cos(angle) * 7.0);
-    mark.rotation.y = angle;
-    mark.material = tileMat;
+  innerRing.position.y = 0.025; innerRing.material = edgeMat;
+  if (isOffice) {
+    ring.isVisible = false;
+    innerRing.isVisible = false;
+  } else {
+    const tileMat = makeMat(scene, 'tile-lines', '#5a5145');
+    for (let i = 0; i < 12; i++) {
+      const angle = (Math.PI * 2 * i) / 12;
+      const mark = MeshBuilder.CreateBox(`floor-mark-${i}`, { width: 0.045, height: 0.018, depth: 1.6 }, scene);
+      mark.position.set(Math.sin(angle) * 7.0, 0.018, Math.cos(angle) * 7.0);
+      mark.rotation.y = angle;
+      mark.material = tileMat;
+    }
   }
+
   const props = [];
-  for (const prop of ARENA_PROPS) {
-    const material = prop.kind === 'pillar' || prop.kind === 'wall' ? woodMat : prop.kind === 'platform' ? stoneMat : darkStoneMat;
+  for (const prop of arenaDefinition.props) {
+    const material = prop.material === 'concrete' ? concreteMat
+      : prop.material === 'metal' ? metalMat
+        : prop.material === 'glass' ? glassMat
+          : prop.material === 'stone' ? stoneMat
+            : prop.kind === 'pillar' || prop.kind === 'wall' ? woodMat
+              : prop.kind === 'platform' ? stoneMat : darkStoneMat;
     let mesh;
-    if (prop.kind === 'pillar') {
-      mesh = MeshBuilder.CreateCylinder(prop.id, { height: prop.h, diameter: prop.w, tessellation: 12 }, scene);
-      mesh.position.set(prop.x, prop.h / 2, prop.z); mesh.material = woodMat;
-      const cap = MeshBuilder.CreateCylinder(`${prop.id}-cap`, { height: 0.22, diameter: prop.w, tessellation: 12 }, scene);
-      cap.position.set(prop.x, prop.h - 0.11, prop.z); cap.material = edgeMat;
-      cap.receiveShadows = true; shadowGenerator.addShadowCaster(cap);
+    if (prop.shape === 'cylinder') {
+      mesh = MeshBuilder.CreateCylinder(prop.id, { height: prop.h, diameter: prop.w, tessellation: 16 }, scene);
+      mesh.position.set(prop.x, (prop.baseY ?? 0) + prop.h / 2, prop.z);
+      mesh.material = material;
+      if (!isOffice) {
+        const cap = MeshBuilder.CreateCylinder(`${prop.id}-cap`, { height: 0.22, diameter: prop.w, tessellation: 16 }, scene);
+        cap.position.set(prop.x, (prop.baseY ?? 0) + prop.h - 0.11, prop.z);
+        cap.material = edgeMat;
+        cap.receiveShadows = true; shadowGenerator.addShadowCaster(cap);
+      }
     } else {
-      // Static props use box render geometry matching the server's exact
-      // width/depth/height collider. Pillars are the only circular footprint.
+      // Box meshes use the exact dimensions and vertical offset consumed by
+      // server collision. No visual-only wall/booth block is added to room 6.
       mesh = MeshBuilder.CreateBox(prop.id, { width: prop.w, height: prop.h, depth: prop.d }, scene);
       mesh.position.set(prop.x, (prop.baseY ?? 0) + prop.h / 2, prop.z);
       mesh.material = prop.kind === 'rock' ? darkStoneMat : material;
@@ -208,25 +343,28 @@ function buildArena(scene, roomKey, shadowGenerator) {
     props.push(mesh);
   }
 
-  // The rear hall and roof are rendered from ARENA_PROPS above so their
-  // server-side collision footprints cannot be accidentally omitted.
-
-  // Lanterns add warm points of light and a recognizable wuxia atmosphere.
-  const lanternMat = makeMat(scene, 'lantern-glass', theme.lantern, { emissive: theme.lantern });
-  const lanternPoints = [[-7.5, 4.0, -7.5], [7.5, 4.0, -7.5], [-7.5, 4.0, 7.5], [7.5, 4.0, 7.5]];
-  lanternPoints.forEach(([x, y, z], i) => {
-    const string = MeshBuilder.CreateCylinder(`lantern-string-${i}`, { height: 0.85, diameter: 0.035 }, scene);
-    string.position.set(x, y + 0.42, z); string.material = darkStoneMat;
-    const lantern = MeshBuilder.CreateSphere(`lantern-${i}`, { diameter: 0.52, segments: 12 }, scene);
-    lantern.scaling.y = 1.25; lantern.position.set(x, y, z); lantern.material = lanternMat;
-    const glow = new PointLight(`lantern-light-${i}`, new Vector3(x, y, z), scene);
-    glow.diffuse = new Color3(1, 0.58, 0.28); glow.intensity = 0.48; glow.range = 7;
-  });
-  return { ground, props, ring, mapName: roomKey };
+  if (isOffice) {
+    buildOfficeDetails(scene, shadowGenerator);
+  } else {
+    // Lanterns add warm points of light and a recognizable wuxia atmosphere.
+    const lanternMat = makeMat(scene, 'lantern-glass', theme.lantern, { emissive: theme.lantern });
+    const lanternPoints = [[-7.5, 4.0, -7.5], [7.5, 4.0, -7.5], [-7.5, 4.0, 7.5], [7.5, 4.0, 7.5]];
+    lanternPoints.forEach(([x, y, z], i) => {
+      const string = MeshBuilder.CreateCylinder(`lantern-string-${i}`, { height: 0.85, diameter: 0.035 }, scene);
+      string.position.set(x, y + 0.42, z); string.material = darkStoneMat;
+      const lantern = MeshBuilder.CreateSphere(`lantern-${i}`, { diameter: 0.52, segments: 12 }, scene);
+      lantern.scaling.y = 1.25; lantern.position.set(x, y, z); lantern.material = lanternMat;
+      const glow = new PointLight(`lantern-light-${i}`, new Vector3(x, y, z), scene);
+      glow.diffuse = new Color3(1, 0.58, 0.28); glow.intensity = 0.48; glow.range = 7;
+    });
+  }
+  return { ground, props, ring, mapName: roomKey, definition: arenaDefinition };
 }
 
 export async function mountArena(canvas, room, roomKey, callbacks = {}) {
   const spectatorMode = callbacks.spectator === true;
+  const roomMeta = ROOMS.find((roomInfo) => roomInfo.key === roomKey);
+  const arenaDefinition = getArenaDefinition(roomMeta?.map ?? roomKey);
   const engine = new Engine(canvas, true, { antialias: true, stencil: true, adaptToDeviceRatio: true, preserveDrawingBuffer: false });
   const scene = new Scene(engine);
   scene.clearColor = new Color3(0.055, 0.052, 0.048).toColor4(1);
@@ -254,7 +392,7 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
     }
   }
 
-  const arena = buildArena(scene, roomKey, shadows);
+  const arena = buildArena(scene, roomKey, shadows, arenaDefinition);
   const camera = new FreeCamera(spectatorMode ? 'spectator-camera' : 'third-person-camera', new Vector3(0, 5, 10), scene);
   camera.minZ = 0.1; camera.maxZ = 250; camera.fov = spectatorMode ? 1.06 : 0.86; camera.inertia = 0;
   scene.activeCamera = camera;
@@ -291,11 +429,11 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
   let lastSnapshotClock = -1;
   const before = { x: 0, y: 0, z: 0 };
   const after = { x: 0, y: 0, z: 0 };
-  const spectatorTarget = new Vector3(0, 0, 0);
+  const spectatorTarget = new Vector3(arenaDefinition.cameraTarget.x, arenaDefinition.cameraTarget.y, arenaDefinition.cameraTarget.z);
 
   function setSpectatorCamera(index) {
     spectatorCameraIndex = ((index % SPECTATOR_CAMERAS.length) + SPECTATOR_CAMERAS.length) % SPECTATOR_CAMERAS.length;
-    const pose = getSpectatorCameraPose(spectatorCameraIndex);
+    const pose = getSpectatorCameraPose(spectatorCameraIndex, arenaDefinition.cameraTarget);
     camera.position.set(pose.x, pose.y, pose.z);
     camera.setTarget(spectatorTarget);
     callbacks.onCameraChange?.({ index: spectatorCameraIndex, label: pose.label });
@@ -518,7 +656,7 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
     rememberPosition();
     for (const cmd of net.pending) {
       rememberPosition();
-      stepFighter(net.sim, cmd);
+      stepFighter(net.sim, cmd, TICK_DT, null, arenaDefinition);
     }
     if (!wasPredicting) return;
     predictedPosition(after);
@@ -582,7 +720,7 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
       net.pending.push(cmd);
       batch.push(encodeCmd(cmd));
       rememberPosition();
-      stepFighter(net.sim, cmd);
+      stepFighter(net.sim, cmd, TICK_DT, null, arenaDefinition);
     }
     if (batch.length) room.send('cmds', batch);
     if (net.pending.length > MAX_PENDING_CMDS) net.pending.splice(0, net.pending.length - MAX_PENDING_CMDS);

@@ -1,3 +1,11 @@
+## Phòng 6 – Trước cổng công ty
+
+- Tách cấu hình đấu trường theo `map` thay vì áp dụng một bộ `ARENA_PROPS` cho cả sáu phòng; phòng 1–5 giữ nguyên hình học cổ điển.
+- Dựng checkpoint có hai cánh tường, trụ đọc thẻ và thanh chắn, chốt bảo vệ có cửa kính / quầy / mái, hành lang hẹp có ba cụm cửa thang máy mỗi bên, tường biên và tường hồi khép kín lối vòng ra ngoài, sau đó mở thành sảnh chữ T rộng có băng ghế thấp.
+- Dùng cùng một tập prop (tọa độ, kích thước, độ cao, hình trụ / hộp) cho Babylon mesh, Havok aggregate, va chạm di chuyển phía server, dự đoán client, điểm tựa khi nhảy và kiểm tra chưởng va địa hình. Các chi tiết cửa thang máy là lớp ốp trực tiếp trên collider tường, không tạo cửa xuyên tường.
+- Đặt điểm xuất hiện của hai võ sinh và tâm bốn camera người xem vào phần sảnh rộng của chữ T.
+- Bổ sung kiểm thử map riêng, va chạm hành lang / thanh chắn, điểm đứng trên băng ghế và camera người xem.
+
 ## Luật HP, nổ chưởng khi va địa hình và đồng bộ collider đấu trường
 
 - Thay hệ thống tính điểm bằng 100 HP cho mỗi võ sinh; mọi hit quyền pháp / chưởng pháp trừ HP của người nhận đòn, HP về 0 kết thúc trận và người gây sát thương thắng. Hỏa Diệm tiếp tục gây sát thương đốt theo thời gian (1 HP mỗi giây).

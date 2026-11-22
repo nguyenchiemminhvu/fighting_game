@@ -13,15 +13,15 @@ export const SPECTATOR_CAMERAS = Object.freeze([
   { key: 'west', label: 'Phía Tây', x: -1, z: 0 },
 ]);
 
-export function getSpectatorCameraPose(index) {
+export function getSpectatorCameraPose(index, focus = { x: 0, y: 0, z: 0 }) {
   const camera = SPECTATOR_CAMERAS[((index % SPECTATOR_CAMERAS.length) + SPECTATOR_CAMERAS.length) % SPECTATOR_CAMERAS.length];
   return {
-    x: camera.x * SPECTATOR_CAMERA_DISTANCE,
-    y: SPECTATOR_CAMERA_HEIGHT,
-    z: camera.z * SPECTATOR_CAMERA_DISTANCE,
-    targetX: 0,
-    targetY: 0,
-    targetZ: 0,
+    x: (focus.x ?? 0) + camera.x * SPECTATOR_CAMERA_DISTANCE,
+    y: (focus.y ?? 0) + SPECTATOR_CAMERA_HEIGHT,
+    z: (focus.z ?? 0) + camera.z * SPECTATOR_CAMERA_DISTANCE,
+    targetX: focus.x ?? 0,
+    targetY: focus.y ?? 0,
+    targetZ: focus.z ?? 0,
     label: camera.label,
   };
 }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ARENA_LIMIT, ARENA_PROPS, MAX_HP, PALMS, PREP_SECONDS, ROOMS, ROOM_CAPACITY, applyHealthDamage, blastRadiusForDamage, overlapsPropFootprint, projectileIntersectsProp, isEngagedWithOpponent, advanceDisengagementTicks, resolveDisengagementOutcome, DISENGAGEMENT_LIMIT_SECONDS, DISENGAGEMENT_HALF_ANGLE_DEGREES } from '../src/game/rules.js';
+import { ARENA_LIMIT, ARENA_PROPS, ARENA_MAPS, getArenaDefinition, MAX_HP, PALMS, PREP_SECONDS, ROOMS, ROOM_CAPACITY, applyHealthDamage, blastRadiusForDamage, overlapsPropFootprint, projectileIntersectsProp, isEngagedWithOpponent, advanceDisengagementTicks, resolveDisengagementOutcome, DISENGAGEMENT_LIMIT_SECONDS, DISENGAGEMENT_HALF_ANGLE_DEGREES } from '../src/game/rules.js';
 
 test('fixed lobby contains six two-player rooms', () => {
   assert.equal(ROOMS.length, 6);
@@ -166,4 +166,56 @@ test('projectiles collide with the matching wall, pillar and raised roof volumes
   assert.equal(projectileIntersectsProp(wall.x, 1, wall.z, 0.1, wall), true);
   assert.equal(projectileIntersectsProp(roof.x, 2.2, roof.z, 0.1, roof), true);
   assert.equal(projectileIntersectsProp(roof.x, 1, roof.z, 0.1, roof), false);
+});
+
+
+test('room 6 uses its own office gate map while rooms 1-5 keep the classic arena', () => {
+  assert.equal(ROOMS[5].name, 'Trước cổng công ty');
+  assert.equal(ROOMS[5].map, 'office-gate');
+  const office = getArenaDefinition(ROOMS[5].map);
+  assert.equal(office.id, 'office-gate');
+  assert.notEqual(office.props, ARENA_PROPS);
+  for (const room of ROOMS.slice(0, 5)) {
+    assert.equal(getArenaDefinition(room.map).props, ARENA_PROPS);
+  }
+  assert.equal(getArenaDefinition('unknown-map'), ARENA_MAPS.classic);
+});
+
+test('office gate geometry covers the checkpoint, elevator corridor and T lobby', () => {
+  const office = getArenaDefinition('office-gate');
+  const find = (id) => office.props.find((prop) => prop.id === id);
+  const entryWall = find('office-entry-wall-left');
+  const gateArm = find('office-turnstile-left-arm');
+  const cardReader = find('office-card-reader-screen-left');
+  const westDoor = find('office-elevator-door-west-1');
+  const westElevatorWall = find('office-elevator-wall-left');
+  const oppositeGateArm = find('office-turnstile-right-arm');
+  const elevatorWall = find('office-elevator-wall-left');
+  const lobbyBench = find('office-bench-west');
+  const lobbySideWall = find('office-lobby-wall-west');
+  const outerStemWall = find('office-stem-outer-wall-west');
+  const stemReturn = find('office-stem-return-west');
+
+  assert.ok(entryWall && gateArm && cardReader && westDoor && westElevatorWall && oppositeGateArm && elevatorWall && lobbyBench && lobbySideWall && outerStemWall && stemReturn);
+  assert.equal(entryWall.h, 3.45);
+  assert.equal(elevatorWall.d, 16.0);
+  assert.equal(lobbySideWall.d, 11.2);
+  assert.equal(outerStemWall.d, 16.67);
+  assert.equal(stemReturn.w, 9.2);
+  const clearGateWidth = (oppositeGateArm.x - oppositeGateArm.w / 2) - (gateArm.x + gateArm.w / 2);
+  assert.ok(clearGateWidth > 2.0, 'the turnstile leaves a walkable central entry lane');
+  assert.equal(office.cameraTarget.z, 8.2);
+  assert.deepEqual(office.spawns.map(({ x, z }) => [x, z]), [[0, 6], [0, 10.2]]);
+
+  for (const prop of office.props) {
+    assert.ok(Number.isFinite(prop.x) && Number.isFinite(prop.z));
+    assert.ok(prop.w > 0 && prop.d > 0 && prop.h > 0);
+    if (prop.baseY != null) assert.ok(Number.isFinite(prop.baseY));
+  }
+  assert.equal(projectileIntersectsProp(gateArm.x, 0.9, gateArm.z, 0.1, gateArm), true);
+  assert.equal(projectileIntersectsProp(cardReader.x, 0.9, cardReader.z, 0.02, cardReader), true);
+  assert.equal(westDoor.x - westDoor.w / 2, westElevatorWall.x + westElevatorWall.w / 2);
+  assert.equal(projectileIntersectsProp(westDoor.x, 1.2, westDoor.z, 0.02, westDoor), true);
+  assert.equal(projectileIntersectsProp(elevatorWall.x, 1.2, elevatorWall.z, 0.1, elevatorWall), true);
+  assert.equal(overlapsPropFootprint(lobbyBench.x, lobbyBench.z, 0.25, lobbyBench), true);
 });

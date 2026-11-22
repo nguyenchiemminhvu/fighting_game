@@ -450,7 +450,7 @@ export function App() {
               const status = getRoomStatus(room);
               return (
                 <article className={`room-card room-${index + 1}`} key={room.key}>
-                  <div className="room-art"><span className="room-number">0{index + 1}</span><span className="room-landscape" /><span className="room-seal">{['亭', '寺', '武', '江', '竹', '月'][index]}</span></div>
+                  <div className="room-art"><span className="room-number">0{index + 1}</span><span className="room-landscape" /><span className="room-seal">{['亭', '寺', '武', '江', '竹', '企'][index]}</span></div>
                   <div className="room-info">
                     <div><h3>{room.name}</h3><p>{room.subtitle}</p></div>
                     <div className={`room-state ${status.className}`}><i />{status.label}</div>

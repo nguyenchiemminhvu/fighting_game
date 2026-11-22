@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PALMS } from '../src/game/rules.js';
+import { getArenaDefinition, PALMS } from '../src/game/rules.js';
 import {
   NEUTRAL_CMD, RUN_SPEED, BACKWARD_SPEED, TICK_DT,
   createFighter, decodeCmd, displaceFighter, encodeCmd, packFighter, stepFighter, unpackFighter,
@@ -149,4 +149,31 @@ test('rear hall wall and round pillars block movement at their rendered footprin
   const pillarApproach = createFighter(-8.4, -5.0, 0);
   run(pillarApproach, 90, input({ f: 1 }));
   near(pillarApproach.z, -6.67, 1e-5);
+});
+
+
+test('room-specific prediction uses the office corridor walls and low bench support', () => {
+  const office = getArenaDefinition('office-gate');
+  const fighter = createFighter(0, -9, 0);
+  for (let i = 0; i < 240; i++) stepFighter(fighter, input({ r: -1 }), TICK_DT, null, office);
+  assert.ok(fighter.x < 4.2 && fighter.x > 3.7, `fighter stopped at x=${fighter.x}`);
+
+  const benchFighter = createFighter(-10.2, 8.1, 0);
+  benchFighter.y = 0.9;
+  benchFighter.vy = -2;
+  benchFighter.grounded = false;
+  for (let i = 0; i < 30 && !benchFighter.grounded; i++) {
+    stepFighter(benchFighter, input(), TICK_DT, null, office);
+  }
+  assert.equal(benchFighter.grounded, true);
+  assert.ok(Math.abs(benchFighter.y - 0.68) < 1e-9);
+});
+
+
+test('the RFID gate and T-shaped corridor remain traversable through the central lane', () => {
+  const office = getArenaDefinition('office-gate');
+  const fighter = createFighter(0, -11, 0);
+  for (let i = 0; i < 240; i++) stepFighter(fighter, input({ f: -1 }), TICK_DT, null, office);
+  assert.ok(fighter.z > 7.5, `fighter should pass through gate and reach the lobby, z=${fighter.z}`);
+  assert.ok(Math.abs(fighter.x) < 1e-9);
 });

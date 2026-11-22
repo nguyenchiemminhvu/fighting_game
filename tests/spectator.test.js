@@ -32,3 +32,14 @@ test('four spectator viewpoints surround the arena at a 45-degree elevation', ()
   }
   assert.equal(getSpectatorCameraPose(4).label, getSpectatorCameraPose(0).label);
 });
+
+
+test('spectator cameras can focus the custom room lobby while preserving 45-degree elevation', () => {
+  const focus = { x: 0, y: 0, z: 8.2 };
+  for (let index = 0; index < 4; index++) {
+    const pose = getSpectatorCameraPose(index, focus);
+    assert.equal(pose.targetZ, 8.2);
+    assert.equal(Math.hypot(pose.x - focus.x, pose.z - focus.z), 21);
+    assert.equal(pose.y - focus.y, 21);
+  }
+});

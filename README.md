@@ -7,6 +7,7 @@ Prototype game đối kháng võ thuật 3D 1-vs-1 chạy trên trình duyệt b
 - Physics scene: Babylon.js Physics V2 + Havok (fallback to visual scene if Havok cannot initialize).
 - No account, no database, no saved progress.
 - Six fixed rooms; each room has at most two fighters and ten read-only spectators.
+- Room 6, “Trước cổng công ty”, has a separate checkpoint → elevator corridor → T-shaped lobby layout; its static geometry is shared by rendering and authoritative collision.
 - The lobby header shows active lobby sessions only; fighter and spectator sessions are excluded.
 
 ## 1. Yêu cầu
@@ -92,6 +93,7 @@ Khi bật nhảy, nhân vật mang theo vận tốc chạy lúc rời đất (đ
 
 - Đại Lực Kim Cang Chưởng là một bàn tay khổng lồ (bán kính 3,6 quanh đường bay): không né ngang hay nhảy qua được, chỉ có thể lùi ra khỏi tầm. Vùng trúng là một mặt phẳng dày theo hướng bay nên không đánh trúng người đứng sau lưng; chỉ phần lõi nhỏ của chưởng bị địa hình triệt tiêu.
 - Đấu trường có giới hạn di chuyển, trụ, tường, đá và bục; các vật cản đứng yên, collider được dùng chung dữ liệu kích thước / hình dạng với mesh render. Có thể nhảy lên đứng và di chuyển trên bục / đá / tường thấp; chưởng va vật cản tạo vụ nổ có bán kính bằng `0,14 × sát thương gốc` (đơn vị thế giới), gây đủ sát thương và hiệu ứng kỹ năng nhưng không đẩy lùi.
+- Phòng 6 có kiến trúc riêng: tường cổng kiểm soát, trụ đọc thẻ và thanh chắn, chốt bảo vệ, hành lang chữ T hẹp với dãy cửa thang máy ở hai bên, tường biên và tường hồi khép kín hai khoang phụ, sau đó mở ra sảnh giao nhau rộng. Băng ghế thấp ở sảnh có thể nhảy lên và đứng; tường, kính, thanh chắn, thang máy và chưởng pháp dùng chung dữ liệu vật cản. Hai võ sinh xuất hiện ở phần sảnh rộng; bốn camera người xem hướng vào khu vực này.
 
 ## 5. Kiến trúc
 
@@ -166,7 +168,7 @@ Tài liệu chính thức tham khảo: [GitHub — tạo repository](https://doc
 src/
   game/       # Babylon.js scene, input, client rendering, luật dùng chung
               #   spectatorCameras.js – giới hạn người xem và 4 camera cố định
-              #   rules.js   – hằng số phòng, chưởng pháp, vật cản
+              #   rules.js   – hằng số phòng, chưởng pháp, cấu hình hình học từng map
               #   fighter.js – mô phỏng võ sinh xác định, dùng chung client/server
               #   arena.js   – render, dự đoán phía client, nội suy
   ui/         # React lobby, prep screen, HUD và kết quả

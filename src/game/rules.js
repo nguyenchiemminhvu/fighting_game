@@ -10,7 +10,7 @@ export const ROOMS = [
   { key: 'room-3', name: 'Võ đường', subtitle: 'Sàn gỗ · võ khí', map: 'dojo' },
   { key: 'room-4', name: 'Bãi sông', subtitle: 'Đá tảng · sương nước', map: 'riverside' },
   { key: 'room-5', name: 'Rừng trúc', subtitle: 'Trúc xanh · địa hình', map: 'bamboo' },
-  { key: 'room-6', name: 'Đài nguyệt', subtitle: 'Sân tròn · đài cao', map: 'moon' },
+  { key: 'room-6', name: 'Trước cổng công ty', subtitle: 'Cổng quẹt thẻ · sảnh chữ T', map: 'office-gate' },
 ];
 
 export const PALMS = {
@@ -86,6 +86,101 @@ export const ARENA_PROPS = [
 ];
 
 export const ARENA_LIMIT = 14.6;
+
+// Room-specific geometry is data, not duplicated client/server scene code.
+// The same objects drive Babylon meshes, server collision, projectile blocking,
+// client prediction and jump landing support. `baseY` is the bottom of a raised
+// solid; `w/d/h` are the exact box dimensions (cylinders use `w` as diameter).
+const OFFICE_GATE_PROPS = [
+  // Checkpoint boundary and the overhead sign beam. The two wall wings leave
+  // a controlled central entrance into the narrow stem of the T-shaped lobby.
+  { id: 'office-entry-wall-left', kind: 'wall', material: 'concrete', x: -10.0, z: -13.92, w: 8.0, d: 0.5, h: 3.45 },
+  { id: 'office-entry-wall-right', kind: 'wall', material: 'concrete', x: 10.0, z: -13.92, w: 8.0, d: 0.5, h: 3.45 },
+  { id: 'office-entry-sign-beam', kind: 'beam', material: 'metal', x: 0, z: -13.66, w: 5.8, d: 0.34, h: 0.42, baseY: 3.0 },
+
+  // Card readers / waist-high turnstiles. Their posts and swing bars are all
+  // solid volumes; jumping over the bars remains possible under fighter rules.
+  { id: 'office-turnstile-left-post', kind: 'pillar', material: 'metal', shape: 'cylinder', x: -1.45, z: -12.55, w: 0.52, d: 0.52, h: 1.12 },
+  { id: 'office-turnstile-right-post', kind: 'pillar', material: 'metal', shape: 'cylinder', x: 1.45, z: -12.55, w: 0.52, d: 0.52, h: 1.12 },
+  { id: 'office-card-reader-screen-left', kind: 'display', material: 'display', x: -1.17, z: -12.55, w: 0.04, d: 0.2, h: 0.22, baseY: 0.8 },
+  { id: 'office-card-reader-screen-right', kind: 'display', material: 'display', x: 1.17, z: -12.55, w: 0.04, d: 0.2, h: 0.22, baseY: 0.8 },
+  { id: 'office-turnstile-left-arm', kind: 'barrier', material: 'glass', x: -2.0, z: -12.55, w: 1.1, d: 0.12, h: 0.12, baseY: 0.82 },
+  { id: 'office-turnstile-right-arm', kind: 'barrier', material: 'glass', x: 2.0, z: -12.55, w: 1.1, d: 0.12, h: 0.12, baseY: 0.82 },
+
+  // Guard booth at the left side of the checkpoint. The booth is assembled
+  // from the same boxes used for collision, including its glass and canopy.
+  { id: 'office-guard-left-side', kind: 'wall', material: 'concrete', x: -12.18, z: -10.65, w: 0.18, d: 2.55, h: 2.65 },
+  { id: 'office-guard-right-side', kind: 'wall', material: 'concrete', x: -8.62, z: -10.65, w: 0.18, d: 2.55, h: 2.65 },
+  { id: 'office-guard-rear-wall', kind: 'wall', material: 'concrete', x: -10.4, z: -9.39, w: 3.72, d: 0.18, h: 2.65 },
+  { id: 'office-guard-window', kind: 'glass', material: 'glass', x: -10.4, z: -11.88, w: 3.45, d: 0.12, h: 1.45, baseY: 1.05 },
+  { id: 'office-guard-counter', kind: 'counter', material: 'metal', x: -10.4, z: -11.48, w: 3.7, d: 0.62, h: 0.96 },
+  { id: 'office-guard-canopy', kind: 'roof', material: 'metal', x: -10.4, z: -10.65, w: 3.95, d: 2.95, h: 0.2, baseY: 2.65 },
+
+  // Narrow stem of the T: two continuous side walls, lined with elevator bays.
+  { id: 'office-elevator-wall-left', kind: 'wall', material: 'concrete', x: -4.78, z: -5.0, w: 0.55, d: 16.0, h: 3.75 },
+  { id: 'office-elevator-wall-right', kind: 'wall', material: 'concrete', x: 4.78, z: -5.0, w: 0.55, d: 16.0, h: 3.75 },
+  // Elevator leaf panels project from the wall face by 6.5 cm and therefore
+  // have their own matching render / movement / projectile / Havok boxes.
+  { id: 'office-elevator-door-west-1', kind: 'door', material: 'metal', x: -4.4725, z: -9.4, w: 0.065, d: 1.84, h: 2.42, baseY: 0.13 },
+  { id: 'office-elevator-door-west-2', kind: 'door', material: 'metal', x: -4.4725, z: -5.2, w: 0.065, d: 1.84, h: 2.42, baseY: 0.13 },
+  { id: 'office-elevator-door-west-3', kind: 'door', material: 'metal', x: -4.4725, z: -1.0, w: 0.065, d: 1.84, h: 2.42, baseY: 0.13 },
+  { id: 'office-elevator-door-east-1', kind: 'door', material: 'metal', x: 4.4725, z: -9.4, w: 0.065, d: 1.84, h: 2.42, baseY: 0.13 },
+  { id: 'office-elevator-door-east-2', kind: 'door', material: 'metal', x: 4.4725, z: -5.2, w: 0.065, d: 1.84, h: 2.42, baseY: 0.13 },
+  { id: 'office-elevator-door-east-3', kind: 'door', material: 'metal', x: 4.4725, z: -1.0, w: 0.065, d: 1.84, h: 2.42, baseY: 0.13 },
+  // Outer stem walls and short return walls close off the space beside the
+  // corridor. Players cannot walk around the elevator walls to bypass the T.
+  { id: 'office-stem-outer-wall-west', kind: 'wall', material: 'concrete', x: -13.98, z: -5.335, w: 0.55, d: 16.67, h: 3.25 },
+  { id: 'office-stem-outer-wall-east', kind: 'wall', material: 'concrete', x: 13.98, z: -5.335, w: 0.55, d: 16.67, h: 3.25 },
+  { id: 'office-stem-return-west', kind: 'wall', material: 'concrete', x: -9.4, z: 3.0, w: 9.2, d: 0.55, h: 3.25 },
+  { id: 'office-stem-return-east', kind: 'wall', material: 'concrete', x: 9.4, z: 3.0, w: 9.2, d: 0.55, h: 3.25 },
+
+  // Wide crossbar lobby at the end of the corridor.
+  { id: 'office-lobby-wall-west', kind: 'wall', material: 'concrete', x: -13.98, z: 8.55, w: 0.55, d: 11.2, h: 3.25 },
+  { id: 'office-lobby-wall-east', kind: 'wall', material: 'concrete', x: 13.98, z: 8.55, w: 0.55, d: 11.2, h: 3.25 },
+  { id: 'office-lobby-wall-south', kind: 'wall', material: 'concrete', x: 0, z: 14.05, w: 28.0, d: 0.55, h: 3.25 },
+
+  // Low fixed waiting benches: players can jump onto and stand on their tops.
+  { id: 'office-bench-west', kind: 'platform', material: 'stone', x: -10.2, z: 8.1, w: 3.0, d: 0.9, h: 0.68 },
+  { id: 'office-bench-east', kind: 'platform', material: 'stone', x: 10.2, z: 8.1, w: 3.0, d: 0.9, h: 0.68 },
+];
+
+const CLASSIC_ARENA = {
+  id: 'classic',
+  props: ARENA_PROPS,
+  limitX: ARENA_LIMIT,
+  limitZ: ARENA_LIMIT,
+  spawns: [
+    { x: 0, z: 4.5, yaw: 0 },
+    { x: 0, z: -4.5, yaw: Math.PI },
+  ],
+  cameraTarget: { x: 0, y: 0, z: 0 },
+};
+
+export const ARENA_MAPS = {
+  classic: CLASSIC_ARENA,
+  courtyard: CLASSIC_ARENA,
+  temple: CLASSIC_ARENA,
+  dojo: CLASSIC_ARENA,
+  riverside: CLASSIC_ARENA,
+  bamboo: CLASSIC_ARENA,
+  'office-gate': {
+    id: 'office-gate',
+    props: OFFICE_GATE_PROPS,
+    limitX: ARENA_LIMIT,
+    limitZ: ARENA_LIMIT,
+    // Both fighters begin in the wide crossbar lobby rather than one being
+    // trapped in the narrow corridor by the room's asymmetric architecture.
+    spawns: [
+      { x: 0, z: 6.0, yaw: 0 },
+      { x: 0, z: 10.2, yaw: Math.PI },
+    ],
+    cameraTarget: { x: 0, y: 0, z: 8.2 },
+  },
+};
+
+export function getArenaDefinition(mapId = 'classic') {
+  return ARENA_MAPS[mapId] ?? CLASSIC_ARENA;
+}
 
 export function blastRadiusForDamage(damage) {
   return Math.max(0, Number(damage) || 0) * BLAST_RADIUS_PER_DAMAGE;
