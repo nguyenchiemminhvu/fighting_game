@@ -128,3 +128,14 @@ test('fighters can jump onto props, stand on them, and are never pushed through 
   displaceFighter(victim, 0, -5);
   near(victim.z, -10.5 + 0.48, 1e-6);
 });
+
+
+test('rear hall wall and round pillars block movement at their rendered footprint', () => {
+  const hallApproach = createFighter(0, -13.0, 0);
+  run(hallApproach, 90, input({ f: 1 }));
+  near(hallApproach.z, -12.82, 1e-5);
+
+  const pillarApproach = createFighter(-8.4, -5.0, 0);
+  run(pillarApproach, 90, input({ f: 1 }));
+  near(pillarApproach.z, -6.67, 1e-5);
+});

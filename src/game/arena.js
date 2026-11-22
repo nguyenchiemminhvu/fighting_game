@@ -53,14 +53,6 @@ function makeMat(scene, name, diffuse, options = {}) {
   return mat;
 }
 
-function addBox(scene, name, position, scaling, material, shadow = true) {
-  const mesh = MeshBuilder.CreateBox(name, { width: scaling.x, height: scaling.y, depth: scaling.z }, scene);
-  mesh.position.copyFrom(position);
-  mesh.material = material;
-  mesh.receiveShadows = true;
-  if (shadow) mesh.receiveShadows = true;
-  return mesh;
-}
 
 function makeLimb(scene, root, name, length, diameter, material, x, y, z) {
   const pivot = new TransformNode(`${name}-pivot`, scene);
@@ -198,26 +190,26 @@ function buildArena(scene, roomKey, shadowGenerator) {
     if (prop.kind === 'pillar') {
       mesh = MeshBuilder.CreateCylinder(prop.id, { height: prop.h, diameter: prop.w, tessellation: 12 }, scene);
       mesh.position.set(prop.x, prop.h / 2, prop.z); mesh.material = woodMat;
-      const cap = MeshBuilder.CreateCylinder(`${prop.id}-cap`, { height: 0.22, diameter: prop.w * 1.28, tessellation: 12 }, scene);
-      cap.position.set(prop.x, prop.h - 0.1, prop.z); cap.material = edgeMat;
+      const cap = MeshBuilder.CreateCylinder(`${prop.id}-cap`, { height: 0.22, diameter: prop.w, tessellation: 12 }, scene);
+      cap.position.set(prop.x, prop.h - 0.11, prop.z); cap.material = edgeMat;
       cap.receiveShadows = true; shadowGenerator.addShadowCaster(cap);
-    } else if (prop.kind === 'rock') {
-      mesh = MeshBuilder.CreatePolyhedron(prop.id, { type: 1, size: 1, sizeX: prop.w, sizeY: prop.h, sizeZ: prop.d }, scene);
-      mesh.position.set(prop.x, prop.h * 0.47, prop.z); mesh.rotation.y = prop.x * 0.14; mesh.material = darkStoneMat;
     } else {
+      // Static props use box render geometry matching the server's exact
+      // width/depth/height collider. Pillars are the only circular footprint.
       mesh = MeshBuilder.CreateBox(prop.id, { width: prop.w, height: prop.h, depth: prop.d }, scene);
-      mesh.position.set(prop.x, prop.h / 2, prop.z); mesh.material = material;
+      mesh.position.set(prop.x, (prop.baseY ?? 0) + prop.h / 2, prop.z);
+      mesh.material = prop.kind === 'rock' ? darkStoneMat : material;
     }
     mesh.receiveShadows = true; shadowGenerator.addShadowCaster(mesh);
-    if (scene.getPhysicsEngine()) new PhysicsAggregate(mesh, PhysicsShapeType.BOX, { mass: 0, friction: 0.7 }, scene);
+    if (scene.getPhysicsEngine()) {
+      const shape = prop.shape === 'cylinder' ? PhysicsShapeType.CYLINDER : PhysicsShapeType.BOX;
+      new PhysicsAggregate(mesh, shape, { mass: 0, friction: 0.7 }, scene);
+    }
     props.push(mesh);
   }
 
-  // A small martial hall silhouette at the rear gives scale without blocking the duel.
-  const hallBack = addBox(scene, 'hall-back', new Vector3(0, 1.0, -14.4), new Vector3(7.6, 2, 0.8), woodMat);
-  const hallRoof = MeshBuilder.CreateBox('hall-roof', { width: 8.8, height: 0.42, depth: 1.8 }, scene);
-  hallRoof.position.set(0, 2.25, -14.2); hallRoof.rotation.x = -0.12; hallRoof.material = darkStoneMat;
-  shadowGenerator.addShadowCaster(hallBack); shadowGenerator.addShadowCaster(hallRoof);
+  // The rear hall and roof are rendered from ARENA_PROPS above so their
+  // server-side collision footprints cannot be accidentally omitted.
 
   // Lanterns add warm points of light and a recognizable wuxia atmosphere.
   const lanternMat = makeMat(scene, 'lantern-glass', theme.lantern, { emissive: theme.lantern });
@@ -230,7 +222,7 @@ function buildArena(scene, roomKey, shadowGenerator) {
     const glow = new PointLight(`lantern-light-${i}`, new Vector3(x, y, z), scene);
     glow.diffuse = new Color3(1, 0.58, 0.28); glow.intensity = 0.48; glow.range = 7;
   });
-  return { ground, props, ring, hallBack, hallRoof, mapName: roomKey };
+  return { ground, props, ring, mapName: roomKey };
 }
 
 export async function mountArena(canvas, room, roomKey, callbacks = {}) {
@@ -274,6 +266,7 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
   const fighters = new Map();
   const fx = new Map();
   const rings = [];
+  const explosions = [];
   let state = room.state;
   let localId = room.sessionId;
   let yaw = room.state?.players?.get(room.sessionId)?.yaw ?? 0;
@@ -457,6 +450,15 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
     rings.push({ mesh, material, life: 0.48, max: 0.48 });
   }
 
+  function spawnExplosion(data) {
+    const color = data.color || '#d9ecff';
+    const material = makeMat(scene, `explosion-mat-${data.id}`, color, { emissive: color, alpha: 0.76 });
+    const mesh = MeshBuilder.CreateSphere(`projectile-explosion-${data.id}`, { diameter: 1, segments: 18 }, scene);
+    mesh.position.set(data.x, data.y, data.z);
+    mesh.material = material;
+    explosions.push({ mesh, material, radius: Math.max(0.1, Number(data.radius) || 1), life: 0.52, max: 0.52 });
+  }
+
   // Each state patch becomes a timestamped snapshot of the remote fighters.
   // `clockOffset` maps our clock onto the server's simulation clock, smoothed
   // so that uneven packet arrival does not show up as uneven motion.
@@ -530,6 +532,7 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
 
   room.onMessage('ack', reconcile);
   room.onMessage('projectile', spawnProjectile);
+  room.onMessage('projectile-explosion', spawnExplosion);
   room.onMessage('projectile-end', (data) => {
     const effect = fx.get(data.id);
     if (effect) {
@@ -946,14 +949,13 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
         callbacks.onState({
           phase: state.phase,
           prepLeft: Math.ceil(state.prepLeft),
-          timeLeft: Math.ceil(state.timeLeft),
           winnerSessionId: state.winnerSessionId,
           resultReason: state.resultReason,
           players: [...players.entries()].map(([id, p]) => {
             // Our own charge bar and cooldown react instantly from the prediction.
             const own = id === localId && predicting ? net.sim : null;
             return {
-              id, name: p.name, score: p.score, palm: p.activePalm,
+              id, name: p.name, hp: p.hp, palm: p.activePalm,
               selectedPalm: p.palm, ready: p.ready,
               action: own ? own.action : p.action,
               charge: own ? chargeProgress(own) : p.charge,
@@ -1003,6 +1005,16 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
       ring.material.alpha = Math.max(0, ring.life / ring.max);
       if (ring.life <= 0) { ring.mesh.dispose(); ring.material.dispose(); rings.splice(i, 1); }
     }
+    for (let i = explosions.length - 1; i >= 0; i--) {
+      const explosion = explosions[i]; explosion.life -= delta;
+      const t = 1 - explosion.life / explosion.max;
+      const scale = explosion.radius * 2 * (0.28 + t * 0.72);
+      explosion.mesh.scaling.setAll(scale);
+      explosion.material.alpha = Math.max(0, 0.76 * (1 - t));
+      if (explosion.life <= 0) {
+        explosion.mesh.dispose(); explosion.material.dispose(); explosions.splice(i, 1);
+      }
+    }
     scene.render();
   }
 
@@ -1038,6 +1050,7 @@ export async function mountArena(canvas, room, roomKey, callbacks = {}) {
       }
       for (const effect of fx.values()) { effect.root.dispose(false, false); effect.materials.forEach((material) => material.dispose()); }
       for (const ring of rings) { ring.mesh.dispose(); ring.material.dispose(); }
+      for (const explosion of explosions) { explosion.mesh.dispose(); explosion.material.dispose(); }
       engine.stopRenderLoop(render);
       scene.dispose(); engine.dispose();
     },

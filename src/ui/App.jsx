@@ -10,19 +10,13 @@ const SERVER_URL = import.meta.env.VITE_SERVER_URL || (
 );
 
 const START_ROOM_STATE = {
-  phase: 'waiting', prepLeft: 10, timeLeft: 300, players: [], localId: '',
+  phase: 'waiting', prepLeft: 10, players: [], localId: '',
 };
 
 function makeName() {
   return `Võ sinh ${Math.floor(10 + Math.random() * 90)}`;
 }
 
-function formatTime(seconds) {
-  const safe = Math.max(0, Number(seconds) || 0);
-  const minutes = Math.floor(safe / 60).toString().padStart(2, '0');
-  const rest = Math.floor(safe % 60).toString().padStart(2, '0');
-  return `${minutes}:${rest}`;
-}
 
 function getRoomStatus(room) {
   if (room.players >= 2) {
@@ -147,8 +141,8 @@ export function App() {
           if (isSpectator && nextState.phase === 'end') {
             setMatchResult((current) => current ?? {
               winnerSessionId: nextState.winnerSessionId ?? '',
-              reason: nextState.resultReason ?? 'time',
-              scores: (nextState.players ?? []).map((player) => ({ id: player.id, name: player.name, score: player.score })),
+              reason: nextState.resultReason ?? 'knockout',
+              players: (nextState.players ?? []).map((player) => ({ id: player.id, name: player.name, hp: player.hp })),
             });
           }
           if (isSpectator) {
@@ -214,8 +208,8 @@ export function App() {
               <span className="score-status">{gameState.spectatorCount ?? 0}/10 người xem</span>
             </div>
             <div className="match-clock">
-              <span>{gameState.phase === 'select' ? 'CHUẨN BỊ GIAO ĐẤU' : gameState.phase === 'end' ? 'KẾT QUẢ TRẬN' : 'THỜI GIAN CÒN LẠI'}</span>
-              <strong>{gameState.phase === 'select' ? `00:${String(gameState.prepLeft ?? 10).padStart(2, '0')}` : formatTime(gameState.timeLeft)}</strong>
+              <span>{gameState.phase === 'select' ? 'CHUẨN BỊ GIAO ĐẤU' : gameState.phase === 'end' ? 'KẾT QUẢ TRẬN' : 'GIAO ĐẤU KHÔNG GIỚI HẠN'}</span>
+              <strong>{gameState.phase === 'select' ? `00:${String(gameState.prepLeft ?? 10).padStart(2, '0')}` : gameState.phase === 'end' ? 'KẾT THÚC' : 'VÔ HẠN'}</strong>
               <small>{connection}</small>
             </div>
             <div className="spectator-scoreboard">
@@ -223,7 +217,8 @@ export function App() {
                 <div className="spectator-score" key={player.id}>
                   <span>{index === 0 ? 'VÕ SINH 1' : 'VÕ SINH 2'}</span>
                   <strong>{player.name}</strong>
-                  <b>{player.score}<small> điểm</small></b>
+                  <b>{player.hp ?? 100}<small> / 100 HP</small></b>
+                  <div className={`hp-meter spectator-hp-meter ${(player.hp ?? 100) <= 30 ? 'critical' : ''}`}><i style={{ width: `${Math.max(0, Math.min(100, player.hp ?? 100))}%` }} /></div>
                 </div>
               ))}
             </div>
@@ -234,18 +229,20 @@ export function App() {
             <div className="fighter-score">
               <span className="fighter-caption">BẠN</span>
               <strong>{localPlayer?.name ?? name}</strong>
-              <span className="score-number">{localPlayer?.score ?? 0}<small> điểm</small></span>
+              <span className="hp-number">{localPlayer?.hp ?? 100}<small> / 100 HP</small></span>
+              <div className={`hp-meter ${(localPlayer?.hp ?? 100) <= 30 ? 'critical' : ''}`}><i style={{ width: `${Math.max(0, Math.min(100, localPlayer?.hp ?? 100))}%` }} /></div>
               <span className="score-status">{localPlayer?.slowT > 0 ? 'Hàn khí' : localPlayer?.burnT > 0 ? 'Thiêu đốt' : 'Võ sinh'}</span>
             </div>
             <div className="match-clock">
-              <span>{gameState.phase === 'select' ? 'CHUẨN BỊ' : gameState.phase === 'waiting' ? 'ĐỢI ĐỐI THỦ' : 'THỜI GIAN CÒN LẠI'}</span>
-              <strong>{gameState.phase === 'select' ? `00:${String(gameState.prepLeft ?? 10).padStart(2, '0')}` : formatTime(gameState.timeLeft)}</strong>
+              <span>{gameState.phase === 'select' ? 'CHUẨN BỊ' : gameState.phase === 'waiting' ? 'ĐỢI ĐỐI THỦ' : gameState.phase === 'end' ? 'KẾT QUẢ' : 'GIAO ĐẤU KHÔNG GIỚI HẠN'}</span>
+              <strong>{gameState.phase === 'select' ? `00:${String(gameState.prepLeft ?? 10).padStart(2, '0')}` : gameState.phase === 'waiting' ? '...' : gameState.phase === 'end' ? 'KẾT THÚC' : 'VÔ HẠN'}</strong>
               <small>{connection}</small>
             </div>
             <div className="fighter-score opponent-score">
               <span className="fighter-caption">ĐỐI THỦ</span>
               <strong>{opponent?.name ?? 'Đang chờ người chơi'}</strong>
-              <span className="score-number">{opponent?.score ?? 0}<small> điểm</small></span>
+              <span className="hp-number">{opponent?.hp ?? 100}<small> / 100 HP</small></span>
+              <div className={`hp-meter ${(opponent?.hp ?? 100) <= 30 ? 'critical' : ''}`}><i style={{ width: `${Math.max(0, Math.min(100, opponent?.hp ?? 100))}%` }} /></div>
               <span className="score-status">{opponent?.slowT > 0 ? 'Hàn khí' : opponent?.burnT > 0 ? 'Thiêu đốt' : opponent ? 'Đối thủ' : 'Chưa ghép cặp'}</span>
             </div>
             <button className="leave-button" onClick={leaveMatch}>Rời sàn</button>
@@ -336,10 +333,10 @@ export function App() {
           <section className="result-panel glass-panel">
             <span className="eyebrow">TRẬN ĐẤU ĐÃ KẾT THÚC</span>
             <h2>{isSpectator ? 'TRẬN ĐẤU ĐÃ HẠ MÀN' : matchResult.winnerSessionId === gameState.localId ? 'ĐẠI HIỆP ĐẠI THẮNG' : matchResult.winnerSessionId ? 'THẤT BẠI' : 'BẤT PHÂN THẮNG BẠI'}</h2>
-            <p>{isSpectator ? 'Bạn sẽ được đưa về hàng chờ khi hai võ sinh rời sàn đấu.' : matchResult.reason === 'forfeit' ? 'Đối thủ đã rời trận.' : 'Đã hết 5 phút giao đấu.'}</p>
-            <div className="result-scores">
-              {(matchResult.scores ?? []).map((score) => (
-                <div key={score.id}><span>{score.name}</span><strong>{score.score}</strong></div>
+            <p>{isSpectator ? 'Bạn sẽ được đưa về hàng chờ khi hai võ sinh rời sàn đấu.' : matchResult.reason === 'forfeit' ? 'Đối thủ đã rời trận.' : 'HP của đối thủ đã giảm về 0.'}</p>
+            <div className="result-hp">
+              {(matchResult.players ?? []).map((player) => (
+                <div key={player.id}><span>{player.name}</span><strong>{player.hp} HP</strong></div>
               ))}
             </div>
             {!isSpectator && <span className="return-countdown">Tự động về hàng chờ sau vài giây…</span>}
@@ -367,7 +364,7 @@ export function App() {
             <span className="eyebrow">MỘT SÀN ĐẤU · HAI CAO THỦ</span>
             <h2>Luận kiếm bằng<br /><em>võ học chân truyền.</em></h2>
             <p>Chọn một võ đài còn chỗ, chờ đối thủ hoặc bước vào trận tỉ thí. Không tài khoản, không lưu tiến trình — chỉ có võ công và bản lĩnh.</p>
-            <div className="hero-tags"><span>✦ 1 VS 1</span><span>✦ 05:00 / TRẬN</span></div>
+            <div className="hero-tags"><span>✦ 1 VS 1</span><span>✦ 100 HP / NGƯỜI</span></div>
           </div>
           <div className="hero-art" aria-hidden="true">
             <div className="moon-disc" />

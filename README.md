@@ -65,7 +65,7 @@ Khi bật nhảy, nhân vật mang theo vận tốc chạy lúc rời đất (đ
 - Sảnh hiển thị sáu phòng cố định với trạng thái trống / đang chờ / giao đấu / hết chỗ xem.
 - Mỗi phòng có tối đa 12 client: hai võ sinh và mười người xem; client chỉ được join phòng có sẵn.
 - Khi người thứ hai vào phòng, cả hai có tối đa 10 giây chọn một chưởng pháp; nếu cả hai chọn xong sớm, trận đấu bắt đầu ngay.
-- Trận đấu kéo dài 5 phút. Không có thanh máu; điểm được cộng khi đòn đánh trúng. Hết giờ, người nhiều điểm hơn thắng.
+- Mỗi võ sinh bắt đầu với 100 HP. Sát thương từ quyền pháp / chưởng pháp trừ trực tiếp HP; ai về 0 HP trước thì thua. Trận đấu không có bộ đếm thời gian.
 - Người còn lại thắng nếu đối thủ rời trận giữa chừng.
 - Võ sinh tự chuyển về sảnh sau khi trận kết thúc; người xem được server đưa về hàng chờ sau khi cả hai võ sinh rời sàn.
 - Quyền pháp chung có chuỗi tối đa ba hit, xen kẽ hoạt ảnh đấm / đá; mỗi hit có khoảng giãn để đối thủ phục hồi.
@@ -80,7 +80,7 @@ Khi bật nhảy, nhân vật mang theo vận tốc chạy lúc rời đất (đ
   | Đại Lực Kim Cang Chưởng | 0,53s | 2,67s | Gần, vùng rất rộng |
 
 - Đại Lực Kim Cang Chưởng là một bàn tay khổng lồ (bán kính 3,6 quanh đường bay): không né ngang hay nhảy qua được, chỉ có thể lùi ra khỏi tầm. Vùng trúng là một mặt phẳng dày theo hướng bay nên không đánh trúng người đứng sau lưng; chỉ phần lõi nhỏ của chưởng bị địa hình triệt tiêu.
-- Đấu trường có giới hạn di chuyển, trụ, tường, đá và bục; các vật cản đứng yên, có thể nhảy lên đứng và di chuyển trên bục / đá / tường thấp, đạn chưởng bị triệt tiêu khi va vật cản.
+- Đấu trường có giới hạn di chuyển, trụ, tường, đá và bục; các vật cản đứng yên, collider được dùng chung dữ liệu kích thước / hình dạng với mesh render. Có thể nhảy lên đứng và di chuyển trên bục / đá / tường thấp; chưởng va vật cản tạo vụ nổ có bán kính bằng `0,14 × sát thương gốc` (đơn vị thế giới), gây đủ sát thương và hiệu ứng kỹ năng nhưng không đẩy lùi.
 
 ## 5. Kiến trúc
 
@@ -90,12 +90,12 @@ Browser (React + Babylon.js)
        v
 Node.js + Colyseus
        |-- 6 fixed FightRoom instances
-       |-- authoritative movement / hit detection / score / timers
+       |-- authoritative movement / hit detection / HP / knockout
        |-- temporary in-memory state only
        `-- Express: /api/rooms, /health, static dist/
 ```
 
-Server quyết định trạng thái phòng, bộ đếm, vị trí, vận khí, hồi chiêu, va chạm đòn đánh và điểm. Client lo render Babylon.js, camera, hiệu ứng hình ảnh và gửi input. Không có DB nên server restart sẽ xóa trạng thái phòng và trận hiện tại.
+Server quyết định trạng thái phòng, HP, vị trí, vận khí, hồi chiêu, va chạm đòn đánh và kết quả knockout. Client lo render Babylon.js, camera, hiệu ứng hình ảnh và gửi input. Không có DB nên server restart sẽ xóa trạng thái phòng và trận hiện tại.
 
 ### Đồng bộ chuyển động
 
@@ -171,5 +171,5 @@ server/
 - Nhân vật và đấu trường hiện dựng bằng hình học procedural / primitive mesh; chưa có model humanoid rigged, motion capture hoặc bộ animation kung-fu chất lượng sản xuất. Các chuyển động, vòng vận khí và hiệu ứng chưởng là procedural để prototype gameplay. Giáng Long có pha xoay thân riêng trên model (không xoay camera), sau đó thu khí về tay và phóng rồng khí.
 - Va chạm nhân vật, bục và đòn đánh được mô phỏng bằng logic gọn nhẹ dùng chung giữa server và client (`fighter.js`); Havok đang bật cho vật lý cảnh tĩnh ở client, chưa phải một hệ thống ragdoll / character controller Havok đầy đủ. Bộ pháp có thời gian hồi chiêu 3 giây; chế độ hỗ trợ ngắm mục tiêu 25° là khóa hướng tại thời điểm phóng, không phải đạn tự đuổi theo đối thủ.
 - Sáu phòng hiện là sáu phòng cố định trên một tiến trình Node; chưa có Redis/presence để scale nhiều server.
-- Cần kiểm thử thực tế với hai trình duyệt / độ trễ mạng và cân bằng lại điểm, tầm đánh, knockback trước khi mở public.
+- Cần kiểm thử thực tế với hai trình duyệt / độ trễ mạng và cân bằng lại sát thương, tầm đánh, knockback trước khi mở public.
 - Hiệu ứng, animation và cân bằng combat là bản nền để tiếp tục thay asset/điều chỉnh, không phải sản phẩm thương mại đã QA.

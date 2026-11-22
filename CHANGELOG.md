@@ -1,3 +1,12 @@
+## Luật HP, nổ chưởng khi va địa hình và đồng bộ collider đấu trường
+
+- Thay hệ thống tính điểm bằng 100 HP cho mỗi võ sinh; mọi hit quyền pháp / chưởng pháp trừ HP của người nhận đòn, HP về 0 kết thúc trận và người gây sát thương thắng. Hỏa Diệm tiếp tục gây sát thương đốt theo thời gian (1 HP mỗi giây).
+- Xóa bộ đếm 5 phút khỏi state server, HUD và màn hình kết quả; chỉ giữ 10 giây chuẩn bị chọn chưởng.
+- Chưởng va mặt đất / vật cản tĩnh sẽ tạo vụ nổ; bán kính nổ bằng `0,14 × sát thương gốc` theo đơn vị thế giới, gây đủ sát thương và hiệu ứng của kỹ năng nếu đối thủ nằm trong vùng nổ nhưng không tạo knockback.
+- Bổ sung hiệu ứng vụ nổ 3D đồng bộ cho võ sinh và người xem.
+- Dùng chung dữ liệu collider cho mesh render và mô phỏng server: trụ dùng footprint hình tròn, khối đá / tường / bục dùng hộp đúng kích thước; đưa tường hậu điện và mái hậu điện vào danh sách vật cản authoritative.
+- Bổ sung test cho luật 100 HP, bán kính nổ theo sát thương, va chạm chưởng với vật cản và di chuyển quanh trụ / tường hậu điện.
+
 # Changelog
 
 ## Chế độ người xem

@@ -3,10 +3,12 @@ import { Schema, MapSchema, defineTypes } from '@colyseus/schema';
 import {
   ARENA_LIMIT,
   ARENA_PROPS,
-  MATCH_SECONDS,
+  MAX_HP,
   PALMS,
+  applyHealthDamage,
+  blastRadiusForDamage,
+  projectileIntersectsProp,
   PREP_SECONDS,
-  clamp,
   computeAimDirection,
 } from '../src/game/rules.js';
 import { getRoomJoinRole, SPECTATOR_LIMIT } from '../src/game/spectatorCameras.js';
@@ -44,7 +46,7 @@ class PlayerState extends Schema {
     this.name = 'Võ sinh';
     this.x = 0; this.y = 0; this.z = 0;
     this.yaw = 0; this.pitch = 0;
-    this.score = 0;
+    this.hp = MAX_HP;
     this.action = 'idle';
     this.actionT = 0;
     this.actionStep = 0;
@@ -60,7 +62,7 @@ class PlayerState extends Schema {
 }
 defineTypes(PlayerState, {
   name: 'string', x: 'number', y: 'number', z: 'number', yaw: 'number', pitch: 'number',
-  score: 'number', action: 'string', actionT: 'number', actionStep: 'number',
+  hp: 'number', action: 'string', actionT: 'number', actionStep: 'number',
   palm: 'string', activePalm: 'string', charge: 'number', cooldown: 'number',
   slowT: 'number', burnT: 'number', ready: 'boolean', jumps: 'number',
 });
@@ -71,7 +73,6 @@ class FightState extends Schema {
     this.roomKey = roomKey;
     this.phase = 'waiting';
     this.prepLeft = PREP_SECONDS;
-    this.timeLeft = MATCH_SECONDS;
     this.players = new MapSchema();
     this.winnerSessionId = '';
     this.resultReason = '';
@@ -82,7 +83,7 @@ class FightState extends Schema {
   }
 }
 defineTypes(FightState, {
-  roomKey: 'string', phase: 'string', prepLeft: 'number', timeLeft: 'number',
+  roomKey: 'string', phase: 'string', prepLeft: 'number',
   players: { map: PlayerState }, winnerSessionId: 'string', resultReason: 'string', roundNo: 'number',
   clock: 'number', viewerCount: 'number',
 });
@@ -169,18 +170,17 @@ export class FightRoom extends Room {
     this.runtime.set(client.sessionId, {
       fighter: createFighter(player.x, player.z, player.yaw),
       queue: [], queuedSeq: 0, lastSeq: 0, lastCmdAt: 0, budget: 0,
-      burnUntil: 0, burnNextAt: 0,
+      burnUntil: 0, burnNextAt: 0, burnOwnerId: '', 
     });
     if (this.state.players.size === 2) {
       this.state.phase = 'select';
       this.state.prepLeft = PREP_SECONDS;
-      this.state.timeLeft = MATCH_SECONDS;
       this.state.roundNo += 1;
       this.ending = false;
       this.projectiles = [];
       for (const [id, p] of this.state.players) {
         p.ready = false;
-        p.score = 0;
+        p.hp = MAX_HP;
         p.charge = 0;
         p.cooldown = 0;
         p.slowT = 0;
@@ -192,6 +192,8 @@ export class FightRoom extends Room {
           rt.fighter = createFighter(p.x, p.z, p.yaw);
           rt.queue.length = 0;
           rt.burnUntil = 0;
+          rt.burnNextAt = 0;
+          rt.burnOwnerId = '';
           this.syncPlayer(p, rt.fighter);
         }
       }
@@ -322,19 +324,18 @@ export class FightRoom extends Room {
       rt.lastCmdAt = Date.now();
     }
     this.state.phase = 'fight';
-    this.state.timeLeft = MATCH_SECONDS;
-    this.broadcast('fight-begins', { duration: MATCH_SECONDS });
+    this.broadcast('fight-begins', { maxHp: MAX_HP });
   }
 
   fixedTick() {
-    this.state.timeLeft = Math.max(0, this.state.timeLeft - TICK_DT);
     this.state.clock += TICK_DT;
     for (const id of [...this.state.players.keys()]) {
+      if (this.state.phase !== 'fight') break;
       const p = this.state.players.get(id);
       const rt = this.runtime.get(id);
       if (p && rt) this.stepPlayer(id, p, rt);
     }
-    this.stepProjectiles(TICK_DT);
+    if (this.state.phase === 'fight') this.stepProjectiles(TICK_DT);
     // Hits move fighters after their own step, so publish positions last.
     for (const [id, p] of this.state.players) {
       const rt = this.runtime.get(id);
@@ -342,20 +343,19 @@ export class FightRoom extends Room {
     }
     this.tickCount += 1;
     if (this.tickCount % ACK_EVERY_TICKS === 0) this.sendAcks();
-    if (this.state.timeLeft <= 0 && this.state.phase === 'fight') {
-      const [a, b] = [...this.state.players.entries()];
-      const winner = !a || !b ? a?.[0] ?? '' : a[1].score === b[1].score ? '' : a[1].score > b[1].score ? a[0] : b[0];
-      this.endMatch(winner, 'time');
-    }
   }
 
   stepPlayer(id, p, rt) {
     const now = Date.now();
     p.burnT = Math.max(0, (rt.burnUntil - now) / 1000);
-    if (rt.burnUntil > now && now >= rt.burnNextAt) {
-      p.score += 1;
+    if (rt.burnUntil > now && now >= rt.burnNextAt && p.hp > 0) {
+      this.applyBurnTick(id, p, rt);
       rt.burnNextAt = now + 1000;
+    } else if (rt.burnUntil <= now && rt.burnOwnerId) {
+      rt.burnOwnerId = '';
+      rt.burnNextAt = 0;
     }
+    if (this.state.phase !== 'fight') return;
 
     rt.budget = Math.min(CMD_BUDGET_MAX, rt.budget + CMD_BUDGET_PER_TICK);
     let ran = false;
@@ -421,12 +421,12 @@ export class FightRoom extends Room {
     const d = Math.hypot(dx, dy, dz) || 1;
     const dot = (dx * fwd.x + dz * fwd.z) / d;
     if (d > 2.25 || dot < 0.58 || Math.abs(dy) > 1.5) return;
-    const score = fighter.actionStep === 3 ? 11 : 8;
-    target.player.score += score;
+    const damage = fighter.actionStep === 3 ? 11 : 8;
     const wasCharging = tf.action === 'charge';
     displaceFighter(tf, (dx / d) * 0.85, (dz / d) * 0.85);
     stunFighter(tf, wasCharging ? 0.26 : 0.19);
-    this.broadcast('impact', { palm: 'fist', x: tf.x, y: tf.y + 1, z: tf.z, targetId: target.id, score });
+    this.broadcast('impact', { palm: 'fist', x: tf.x, y: tf.y + 1, z: tf.z, targetId: target.id, damage });
+    this.applyDamage(target, damage, id, { palm: 'fist', effect: 'melee' });
   }
 
   launchPalm(id, fighter) {
@@ -454,7 +454,7 @@ export class FightRoom extends Room {
       radius: palm.radius,
       depth: palm.depth ?? 0,
       terrainRadius: palm.terrainRadius ?? palm.radius,
-      score: palm.score,
+      damage: palm.damage,
       knockback: palm.knockback,
       effect: palm.effect,
       slowSeconds: palm.slowSeconds ?? 0,
@@ -469,7 +469,7 @@ export class FightRoom extends Room {
   }
 
   stepProjectiles(dt) {
-    if (!this.projectiles.length) return;
+    if (!this.projectiles.length || this.state.phase !== 'fight') return;
     const survivors = [];
     for (const projectile of this.projectiles) {
       const sx = projectile.vx * dt;
@@ -480,13 +480,20 @@ export class FightRoom extends Room {
       projectile.life -= dt;
       const solid = projectile.terrainRadius;
       const blocked = projectile.y <= solid || ARENA_PROPS.some((prop) =>
-        Math.abs(projectile.x - prop.x) < prop.w / 2 + solid &&
-        Math.abs(projectile.z - prop.z) < prop.d / 2 + solid &&
-        projectile.y < prop.h + solid,
+        projectileIntersectsProp(projectile.x, projectile.y, projectile.z, solid, prop),
       );
       const target = this.opponentOf(projectile.ownerId);
       let hit = false;
-      if (!blocked && target) {
+
+      if (blocked) {
+        hit = this.explodeProjectile(projectile, target);
+        if (this.state.phase !== 'fight') {
+          // endMatch already notified clients about every active projectile.
+          this.projectiles = [];
+          return;
+        }
+        this.broadcast('projectile-end', { id: projectile.id, x: projectile.x, y: projectile.y, z: projectile.z, hit: false });
+      } else if (target) {
         const dx = target.fighter.x - projectile.x;
         const dz = target.fighter.z - projectile.z;
         const dy = target.fighter.y + 1.0 - projectile.y;
@@ -502,9 +509,14 @@ export class FightRoom extends Room {
           hit = Math.hypot(dx, dz) < projectile.radius + 0.48 && Math.abs(dy) < verticalReach;
         }
         if (hit) this.applyProjectileHit(projectile, target);
+        if (this.state.phase !== 'fight') {
+          this.projectiles = [];
+          return;
+        }
       }
+
       if (blocked || hit || projectile.life <= 0 || projectile.traveled >= projectile.range || Math.abs(projectile.x) > ARENA_LIMIT + 2 || Math.abs(projectile.z) > ARENA_LIMIT + 2) {
-        this.broadcast('projectile-end', { id: projectile.id, x: projectile.x, y: projectile.y, z: projectile.z, hit });
+        if (!blocked) this.broadcast('projectile-end', { id: projectile.id, x: projectile.x, y: projectile.y, z: projectile.z, hit });
       } else {
         survivors.push(projectile);
       }
@@ -512,25 +524,86 @@ export class FightRoom extends Room {
     this.projectiles = survivors;
   }
 
-  applyProjectileHit(projectile, target) {
+  explodeProjectile(projectile, target = this.opponentOf(projectile.ownerId)) {
+    const radius = blastRadiusForDamage(projectile.damage);
+    const center = { x: projectile.x, y: Math.max(0, projectile.y), z: projectile.z };
+    this.broadcast('projectile-explosion', {
+      id: projectile.id,
+      x: center.x, y: center.y, z: center.z,
+      radius,
+      damage: projectile.damage,
+      palmId: projectile.palmId,
+      color: projectile.color,
+    });
+
+    if (!target || radius <= 0) return false;
+    const dx = target.fighter.x - center.x;
+    const dy = target.fighter.y + 1.0 - center.y;
+    const dz = target.fighter.z - center.z;
+    if (Math.hypot(dx, dy, dz) > radius + 0.48) return false;
+
+    // The blast carries the technique's full base damage and status effect,
+    // but deliberately does not displace the victim.
+    this.applyProjectileHit(projectile, target, { knockback: false });
+    return true;
+  }
+
+  applyBurnTick(id, player, rt) {
+    const target = { id, player, rt, fighter: rt.fighter };
+    const attackerId = rt.burnOwnerId;
+    this.applyDamage(target, 1, attackerId, { palm: 'hoa', effect: 'burn-over-time' });
+  }
+
+  applyDamage(target, amount, attackerId, metadata = {}) {
+    if (this.state.phase !== 'fight' || !target?.player || target.player.hp <= 0) return 0;
+    const damage = Math.max(0, Number(amount) || 0);
+    if (damage <= 0) return 0;
+    target.player.hp = applyHealthDamage(target.player.hp, damage);
+    this.broadcast('damage', {
+      attackerId: attackerId || '',
+      targetId: target.id,
+      damage,
+      remainingHp: target.player.hp,
+      ...metadata,
+    });
+    if (target.player.hp <= 0) {
+      const winnerId = attackerId && this.state.players.has(attackerId)
+        ? attackerId
+        : [...this.state.players.keys()].find((id) => id !== target.id) ?? '';
+      this.endMatch(winnerId, 'knockout');
+    }
+    return damage;
+  }
+
+  applyProjectileHit(projectile, target, options = {}) {
     const tf = target.fighter;
-    target.player.score += projectile.score;
-    // A flat front shoves along its flight path; other palms push away from their core.
-    let dx = projectile.depth > 0 ? projectile.vx : tf.x - projectile.x;
-    let dz = projectile.depth > 0 ? projectile.vz : tf.z - projectile.z;
-    const d = Math.hypot(dx, dz) || 1;
-    dx /= d; dz /= d;
     const wasCharging = tf.action === 'charge';
-    displaceFighter(tf, dx * projectile.knockback, dz * projectile.knockback);
+    if (options.knockback !== false) {
+      // A flat front shoves along its flight path; other palms push away from their core.
+      let dx = projectile.depth > 0 ? projectile.vx : tf.x - projectile.x;
+      let dz = projectile.depth > 0 ? projectile.vz : tf.z - projectile.z;
+      const d = Math.hypot(dx, dz) || 1;
+      dx /= d; dz /= d;
+      displaceFighter(tf, dx * projectile.knockback, dz * projectile.knockback);
+    }
     if (projectile.effect === 'slow') tf.slowT = projectile.slowSeconds;
     if (projectile.effect === 'burn') {
       target.rt.burnUntil = Date.now() + projectile.burnSeconds * 1000;
       target.rt.burnNextAt = Date.now() + 1000;
+      target.rt.burnOwnerId = projectile.ownerId;
     }
     // Every successful hit interrupts charge and briefly prevents an immediate counter.
     if (wasCharging || projectile.effect === 'interrupt') stunFighter(tf, 0.26);
     else tf.comboHeld = false;
-    this.broadcast('impact', { palm: projectile.palmId, x: tf.x, y: tf.y + 1, z: tf.z, targetId: target.id, score: projectile.score, effect: projectile.effect });
+    this.broadcast('impact', {
+      palm: projectile.palmId,
+      x: tf.x, y: tf.y + 1, z: tf.z,
+      targetId: target.id,
+      damage: projectile.damage,
+      effect: projectile.effect,
+      explosion: options.knockback === false,
+    });
+    this.applyDamage(target, projectile.damage, projectile.ownerId, { palm: projectile.palmId, effect: projectile.effect });
   }
 
   endMatch(winnerSessionId, reason) {
@@ -542,12 +615,20 @@ export class FightRoom extends Room {
     for (const p of this.state.players.values()) {
       p.action = 'idle'; p.charge = 0; p.ready = true;
     }
+    for (const projectile of this.projectiles) {
+      this.broadcast('projectile-end', {
+        id: projectile.id,
+        x: projectile.x, y: projectile.y, z: projectile.z,
+        hit: false,
+      });
+    }
+    this.projectiles = [];
     const winner = this.state.players.get(winnerSessionId);
     this.broadcast('match-end', {
       winnerSessionId: winnerSessionId || '',
       winnerName: winner?.name ?? '',
       reason,
-      scores: [...this.state.players.entries()].map(([id, p]) => ({ id, name: p.name, score: p.score })),
+      players: [...this.state.players.entries()].map(([id, p]) => ({ id, name: p.name, hp: p.hp })),
     });
     this.scheduleReset();
   }
@@ -570,7 +651,6 @@ export class FightRoom extends Room {
     this.runtime.clear();
     this.state.phase = 'waiting';
     this.state.prepLeft = PREP_SECONDS;
-    this.state.timeLeft = MATCH_SECONDS;
     this.state.winnerSessionId = '';
     this.state.resultReason = '';
     if (this._endTimer) this.clock.clearTimeout(this._endTimer);

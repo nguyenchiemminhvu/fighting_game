@@ -116,8 +116,12 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .fighter-score { min-width: 0; display: flex; flex-direction: column; gap: 3px; text-shadow: 0 2px 8px #000; }
 .fighter-score strong { font-size: 14px; color: #f3e9d7; }
 .fighter-caption, .status-label { color: #c6a06d; font-size: 8px; letter-spacing: .17em; font-weight: 700; }
-.score-number { font: 31px 'Marcellus', Georgia, serif; color: #f0d2a0; }
-.score-number small { font: 9px 'Be Vietnam Pro', sans-serif; color: #ada18f; }
+.hp-number { font: 25px 'Marcellus', Georgia, serif; color: #f0d2a0; }
+.hp-number small { font: 9px 'Be Vietnam Pro', sans-serif; color: #ada18f; }
+.hp-meter { width: min(170px, 100%); height: 5px; overflow: hidden; border-radius: 6px; background: rgba(235,224,207,.2); box-shadow: inset 0 1px 2px rgba(0,0,0,.4); }
+.hp-meter i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #a84c3d, #d6a56e); transition: width .14s ease-out; }
+.hp-meter.critical i { background: #cf5144; }
+.opponent-score .hp-meter { align-self: flex-end; }
 .score-status { color: #afa493; font-size: 8px; }
 .opponent-score { text-align: right; align-items: end; }
 .match-clock { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 8px 12px 10px; border: 1px solid rgba(201,165,113,.35); background: rgba(17,15,13,.72); box-shadow: 0 8px 24px rgba(0,0,0,.18); }
@@ -163,9 +167,9 @@ kbd { padding: 2px 5px; border: 1px solid rgba(206,175,132,.4); color: #e4c18c; 
 .result-panel { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(420px, calc(100% - 32px)); padding: 28px; text-align: center; }
 .result-panel h2 { font-size: 26px; }
 .result-panel p { color: #a99c88; font-size: 10px; }
-.result-scores { border-top: 1px solid rgba(201,165,113,.2); border-bottom: 1px solid rgba(201,165,113,.2); margin: 17px 0; padding: 6px 0; }
-.result-scores div { display: flex; justify-content: space-between; padding: 7px 2px; font-size: 10px; color: #c7b69a; }
-.result-scores strong { font: 19px 'Marcellus', Georgia, serif; color: #e8c18a; }
+.result-hp { border-top: 1px solid rgba(201,165,113,.2); border-bottom: 1px solid rgba(201,165,113,.2); margin: 17px 0; padding: 6px 0; }
+.result-hp div { display: flex; justify-content: space-between; padding: 7px 2px; font-size: 10px; color: #c7b69a; }
+.result-hp strong { font: 19px 'Marcellus', Georgia, serif; color: #e8c18a; }
 .return-countdown { display: block; margin-bottom: 13px; color: #948879; font-size: 8px; }
 .game-error { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); background: #582a24; border: 1px solid #a65b48; padding: 10px 14px; font-size: 9px; }
 
@@ -206,8 +210,8 @@ kbd { padding: 2px 5px; border: 1px solid rgba(206,175,132,.4); color: #e4c18c; 
   .fight-topbar { grid-template-columns: 1fr 105px 1fr auto; gap: 6px; padding: 10px 9px; }
   .fighter-score strong { font-size: 9px; }
   .fighter-caption { font-size: 6px; }
-  .score-number { font-size: 23px; }
-  .score-number small { font-size: 7px; }
+  .hp-number { font-size: 23px; }
+  .hp-number small { font-size: 7px; }
   .score-status { font-size: 6px; }
   .match-clock { padding: 6px 4px; }
   .match-clock strong { font-size: 21px; }
@@ -250,6 +254,7 @@ kbd { padding: 2px 5px; border: 1px solid rgba(206,175,132,.4); color: #e4c18c; 
 .spectator-score strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #f3e9d7; font-size: 10px; }
 .spectator-score b { color: #f0d2a0; font: 18px 'Marcellus', Georgia, serif; white-space: nowrap; }
 .spectator-score b small { color: #ada18f; font: 8px 'Be Vietnam Pro', sans-serif; }
+.spectator-hp-meter { grid-column: 1 / -1; width: 100%; height: 4px; margin-top: 2px; }
 .spectator-controls { position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%); display: flex; align-items: center; gap: 26px; padding: 13px 16px; min-width: min(410px, calc(100% - 28px)); justify-content: space-between; }
 .spectator-controls > div { display: flex; flex-direction: column; gap: 4px; }
 .spectator-controls strong { color: #ead8bc; font-size: 11px; }

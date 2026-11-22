@@ -1,4 +1,4 @@
-import { ARENA_LIMIT, ARENA_PROPS, PALMS, clamp } from './rules.js';
+import { ARENA_LIMIT, ARENA_PROPS, PALMS, clamp, overlapsPropFootprint } from './rules.js';
 
 // Deterministic fighter simulation shared by the authoritative server and the
 // client's prediction. Both sides advance it in identical fixed ticks, one
@@ -22,6 +22,7 @@ export const BODY_RADIUS = 0.48;
 const SUPPORT_RADIUS = 0.25;
 // Feet this close to a prop's top no longer collide with its sides.
 const STEP_CLEARANCE = 0.06;
+const CHARACTER_HEIGHT = 2.24;
 // Long displacements (dash, knockback) are swept in slices thinner than the
 // thinnest wall so they cannot tunnel through it.
 const MAX_MOVE_SLICE = 0.25;
@@ -110,19 +111,32 @@ function isFree(fighter) {
   return fighter.action === 'idle' || fighter.action === 'run' || fighter.action === 'jump';
 }
 
-function overlapsFootprint(x, z, radius, prop) {
-  const cx = clamp(x, prop.x - prop.w / 2, prop.x + prop.w / 2);
-  const cz = clamp(z, prop.z - prop.d / 2, prop.z + prop.d / 2);
-  return (x - cx) ** 2 + (z - cz) ** 2 < radius ** 2;
-}
-
-// Push the fighter's body circle out of every prop that rises above its feet.
-// Resolving penetration (instead of rejecting the move) slides along walls and
-// around corners, and can never leave the fighter embedded in a prop.
+// Push the fighter's body circle out of every prop whose vertical span
+// intersects the character. Raised props (for example the hall roof) also
+// block the character below their base instead of behaving as decorations.
 function resolveProps(fighter) {
-  for (let pass = 0; pass < 2; pass++) {
+  for (let pass = 0; pass < 3; pass++) {
     for (const prop of ARENA_PROPS) {
-      if (fighter.y >= prop.h - STEP_CLEARANCE) continue;
+      const baseY = prop.baseY ?? 0;
+      const topY = baseY + prop.h;
+      if (fighter.y >= topY - STEP_CLEARANCE || fighter.y + CHARACTER_HEIGHT <= baseY) continue;
+
+      if (prop.shape === 'cylinder') {
+        const dx = fighter.x - prop.x;
+        const dz = fighter.z - prop.z;
+        const minDistance = Math.min(prop.w, prop.d) / 2 + BODY_RADIUS;
+        const distance = Math.hypot(dx, dz);
+        if (distance >= minDistance) continue;
+        if (distance > 1e-9) {
+          const push = (minDistance - distance) / distance;
+          fighter.x += dx * push;
+          fighter.z += dz * push;
+        } else {
+          fighter.x = prop.x + minDistance;
+        }
+        continue;
+      }
+
       const hx = prop.w / 2;
       const hz = prop.d / 2;
       const dx = fighter.x - prop.x;
@@ -179,8 +193,9 @@ function applyGravity(fighter, dt) {
   let support = 0;
   if (fighter.vy <= 0) {
     for (const prop of ARENA_PROPS) {
-      if (oldY < prop.h - 0.08 || nextY > prop.h) continue;
-      if (overlapsFootprint(fighter.x, fighter.z, SUPPORT_RADIUS, prop)) support = Math.max(support, prop.h);
+      const topY = (prop.baseY ?? 0) + prop.h;
+      if (oldY < topY - 0.08 || nextY > topY) continue;
+      if (overlapsPropFootprint(fighter.x, fighter.z, SUPPORT_RADIUS, prop)) support = Math.max(support, topY);
     }
   }
   if (fighter.vy <= 0 && nextY <= support) {
